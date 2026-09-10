@@ -1,0 +1,484 @@
+import { supabase } from './supabaseClient';
+import { Organization, LandingArticle } from '../types';
+import { planService } from './planService';
+
+export const organizationService = {
+    /**
+     * Create a new organization and assign a default plan (e.g., 'free').
+     */
+    async createOrganization(name: string, ownerEmail: string, planSlug: string = 'free'): Promise<Organization | null> {
+        // 1. Verify plan exists
+        const plan = await planService.getPlanBySlug(planSlug);
+        if (!plan) {
+            throw new Error(`Plan '${planSlug}' not found.`);
+        }
+
+        // 2. Create Organization
+        const { data, error } = await supabase
+            .from('organizations')
+            .insert([{
+                name,
+                owner_email: ownerEmail,
+                plan: planSlug,
+                slug: name.toLowerCase().replace(/\s+/g, '-'), // Simple slug generation
+                status: 'active',
+                subscription_status: 'trial', // Start with trial or active
+                // Use plan limits to set initial values if schema requires it, 
+                // otherwise we rely on joining with the plan table or fetching plan details.
+                // For redundant fields if they still exist:
+                max_users: plan.limits.max_users,
+                max_storage_gb: plan.limits.max_storage_gb
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating organization:', error);
+            throw error;
+        }
+
+        return data as Organization;
+    },
+
+    /**
+     * Update an organization's plan.
+     */
+    async updateOrganizationPlan(orgId: string, newPlanSlug: string): Promise<Organization> {
+        // 1. Verify new plan
+        const plan = await planService.getPlanBySlug(newPlanSlug);
+        if (!plan) {
+            throw new Error(`Plan '${newPlanSlug}' not found.`);
+        }
+
+        // 2. Update Organization
+        const { data, error } = await supabase
+            .from('organizations')
+            .update({
+                plan: newPlanSlug,
+                // Update redundant limits if necessary
+                max_users: plan.limits.max_users,
+                max_storage_gb: plan.limits.max_storage_gb
+            })
+            .eq('id', orgId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating organization plan:', error);
+            throw error;
+        }
+
+        return data as Organization;
+    },
+
+    /**
+     * Update an organization's branding (logo, colors, slug)
+     */
+    async updateOrganizationBranding(
+        orgId: string,
+        branding: { slug?: string; primary_color?: string; secondary_color?: string; custom_domain?: string; landing_settings?: any },
+        logoFile?: File
+    ): Promise<Organization> {
+        let logo_url = undefined;
+
+        if (logoFile) {
+            const fileExt = logoFile.name.split('.').pop();
+            const fileName = `${orgId}-logo-${Date.now()}.${fileExt}`;
+            const filePath = `logos/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('organizations')
+                .upload(filePath, logoFile, { upsert: true });
+
+            if (uploadError) {
+                console.error('Error uploading logo:', uploadError);
+                throw uploadError;
+            }
+
+            const { data } = supabase.storage.from('organizations').getPublicUrl(filePath);
+            logo_url = data.publicUrl;
+        }
+
+        const updateData: any = { ...branding };
+        if (logo_url) updateData.logo_url = logo_url;
+
+        const { data, error } = await supabase
+            .from('organizations')
+            .update(updateData)
+            .eq('id', orgId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating organization branding:', error);
+            throw error;
+        }
+
+        return data as Organization;
+    },
+
+    /**
+     * Update organization onboarding status and custom enabled modules
+     */
+    async updateOrganizationOnboarding(
+        orgId: string,
+        onboardingCompleted: boolean,
+        enabledModules: any
+    ): Promise<Organization> {
+        const { data, error } = await supabase
+            .from('organizations')
+            .update({
+                onboarding_completed: onboardingCompleted,
+                enabled_modules: enabledModules
+            })
+            .eq('id', orgId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating organization onboarding:', error);
+            throw error;
+        }
+
+        return data as Organization;
+    },
+
+    /**
+     * Upload landing background image
+     */
+    async uploadLandingBackground(orgId: string, bgFile: File): Promise<string> {
+        const fileExt = bgFile.name.split('.').pop();
+        const fileName = `${orgId}-bg-${Date.now()}.${fileExt}`;
+        const filePath = `backgrounds/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('organizations')
+            .upload(filePath, bgFile, { upsert: true });
+
+        if (uploadError) {
+            console.error('Error uploading background:', uploadError);
+            throw uploadError;
+        }
+
+        const { data } = supabase.storage.from('organizations').getPublicUrl(filePath);
+        return data.publicUrl;
+    },
+
+    /**
+     * Get organization details including plan info/limits.
+     * This logic might be better placed in a hook or context that merges org data with plan data.
+     */
+    async getOrganizationDetails(orgId: string): Promise<Organization & { planDetails?: any }> {
+        const { data, error } = await supabase
+            .from('organizations')
+            .select('*')
+            .eq('id', orgId)
+            .single();
+
+        if (error) {
+            throw error;
+        }
+
+        const org = data as Organization;
+        // Fetch plan details to return full context
+        const plan = await planService.getPlanBySlug(org.plan);
+
+        return {
+            ...org,
+            planDetails: plan
+        };
+    },
+
+    /**
+     * Get organization by custom_domain or slug for the white-label portal
+     */
+    async getOrganizationByDomainOrSlug(hostname: string, slug?: string): Promise<Organization | null> {
+        // Try to match custom domain first
+        const lowerHost = hostname.toLowerCase();
+        const isMainDomain = 
+            lowerHost === 'localhost' || 
+            lowerHost === '127.0.0.1' ||
+            lowerHost === '[::1]' ||
+            lowerHost.endsWith('trazapp.com') || 
+            lowerHost.endsWith('trazapp.ar') || 
+            lowerHost.endsWith('vercel.app') ||
+            /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(lowerHost);
+
+        if (!isMainDomain) {
+            const { data, error } = await supabase
+                .from('organizations')
+                .select('*')
+                .eq('custom_domain', hostname)
+                .single();
+
+            if (data && !error) return data as Organization;
+        }
+
+        // Fallback to slug if provided
+        if (slug) {
+            const { data, error } = await supabase
+                .from('organizations')
+                .select('*')
+                .eq('slug', slug)
+                .single();
+
+            if (error) {
+                if (error.code !== 'PGRST116') {
+                    console.error('Error fetching organization by slug:', error);
+                }
+                return null;
+            }
+            return data as Organization;
+        }
+
+        return null;
+    },
+
+    /**
+     * Get organization by slug for the white-label portal (Legacy, use getOrganizationByDomainOrSlug instead)
+     */
+    async getOrganizationBySlug(slug: string): Promise<Organization | null> {
+        const { data, error } = await supabase
+            .from('organizations')
+            .select('*')
+            .eq('slug', slug)
+            .single();
+
+        if (error) {
+            if (error.code !== 'PGRST116') {
+                console.error('Error fetching organization by slug:', error);
+            }
+            return null;
+        }
+
+        return data as Organization;
+    },
+
+    /**
+     * Get all members of an organization with their profiles
+     */
+    async getOrganizationMembers(orgId: string): Promise<any[]> {
+        console.log(`[DEBUG] getOrganizationMembers called for orgId: ${orgId}`);
+        const { data, error } = await supabase
+            .from('organization_members')
+            .select(`
+                id,
+                role,
+                created_at,
+                user_id,
+                profiles (
+                    id,
+                    email,
+                    full_name,
+                    avatar_url
+                )
+            `)
+            .eq('organization_id', orgId)
+            .not('role', 'in', '("partner","member")');
+
+        if (error) {
+            console.error('Error fetching organization members:', error);
+            throw error;
+        }
+
+        // Map 'profiles' to 'profile' for backward compatibility
+        return data?.map((m: any) => ({
+            ...m,
+            profile: m.profiles
+        })) || [];
+    },
+
+    /**
+     * Update a member's role
+     */
+    async updateMemberRole(orgId: string, userId: string, newRole: string): Promise<boolean> {
+        const { error } = await supabase
+            .from('organization_members')
+            .update({ role: newRole })
+            .eq('organization_id', orgId)
+            .eq('user_id', userId);
+
+        if (error) {
+            console.error('Error updating member role:', error);
+            throw error;
+        }
+
+        return true;
+    },
+
+    /**
+     * Remove a member from the organization
+     */
+    async removeMember(orgId: string, userId: string): Promise<boolean> {
+        const { error } = await supabase
+            .from('organization_members')
+            .delete()
+            .eq('organization_id', orgId)
+            .eq('user_id', userId);
+
+        if (error) {
+            console.error('Error removing member:', error);
+            throw error;
+        }
+
+        return true;
+    },
+
+    /**
+     * Call the create-user Edge Function to create a user directly
+     */
+    async createUserDirectly(orgId: string, email: string, name: string, role: string, password: string): Promise<any> {
+        // First check limits
+        const { data: org, error: orgError } = await supabase
+            .from('organizations')
+            .select('plan')
+            .eq('id', orgId)
+            .single();
+
+        if (orgError || !org) throw new Error('Organización no encontrada');
+
+        const plan = await planService.getPlanBySlug(org.plan);
+        if (!plan) throw new Error('Plan no encontrado');
+
+        const maxUsers = plan.limits.max_users;
+
+        const { count: membersCount, error: countError } = await supabase
+            .from('organization_members')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', orgId)
+            .not('role', 'in', '("partner","member")');
+
+        if (countError) throw countError;
+
+        if ((membersCount || 0) >= maxUsers) {
+            throw new Error(`Has alcanzado el límite de ${maxUsers} usuarios activos permitidos para tu plan. Actualiza tu plan para agregar más.`);
+        }
+
+        // Call the edge function
+        const { data, error } = await supabase.functions.invoke('create-user', {
+            body: {
+                email,
+                password,
+                name,
+                role,
+                organizationId: orgId
+            }
+        });
+
+        if (error) {
+            console.error("Error from edge function:", error);
+            let rawError = error.message;
+            if (error.context && typeof error.context.text === 'function') {
+                try {
+                    const ctxText = await error.context.text();
+                    rawError = `RAW_ERROR: ${ctxText}`;
+                    console.error("Edge function context:", ctxText);
+                } catch (e) { }
+            }
+            else if (error.context && typeof error.context === 'string') {
+                rawError = `RAW_ERROR: ${error.context}`;
+            }
+            throw new Error(rawError || 'Error al crear el usuario en el servidor');
+        }
+
+        if (data?.error) {
+            throw new Error(data.error);
+        }
+
+        return data;
+    },
+
+    // ==========================================
+    // LANDING ARTICLES (PORTFOLIO / MILESTONES)
+    // ==========================================
+
+    async getLandingArticles(orgId: string): Promise<LandingArticle[]> {
+        const { data, error } = await supabase
+            .from('landing_articles')
+            .select('*')
+            .eq('organization_id', orgId)
+            .order('order_index', { ascending: true })
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching landing articles:', error);
+            return [];
+        }
+        return data as LandingArticle[];
+    },
+
+    async uploadLandingArticleImage(orgId: string, articleId: string, imageFile: File): Promise<string> {
+        const fileExt = imageFile.name.split('.').pop();
+        const filePath = `${orgId}/articles/${articleId}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('organizations')
+            .upload(filePath, imageFile, { upsert: true });
+
+        if (uploadError) {
+            console.error('Error uploading article image:', uploadError);
+            throw uploadError;
+        }
+
+        const { data } = supabase.storage
+            .from('organizations')
+            .getPublicUrl(filePath);
+
+        return data.publicUrl;
+    },
+
+    async createLandingArticle(orgId: string, articleData: Partial<LandingArticle>, imageFile?: File): Promise<LandingArticle> {
+        // Create an ID first if we have an image so we can use it in the path
+        const articleId = articleData.id || crypto.randomUUID();
+        let imageUrl = articleData.image_url;
+
+        if (imageFile) {
+            imageUrl = await this.uploadLandingArticleImage(orgId, articleId, imageFile);
+        }
+
+        const { data, error } = await supabase
+            .from('landing_articles')
+            .insert([{
+                ...articleData,
+                id: articleId,
+                organization_id: orgId,
+                image_url: imageUrl,
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating landing article:', error);
+            throw error;
+        }
+
+        return data as LandingArticle;
+    },
+
+    async deleteLandingArticle(id: string, imageUrl?: string): Promise<void> {
+        // Optional: delete image from storage if we can parse the path
+        if (imageUrl && imageUrl.includes('/organizations/')) {
+            try {
+                const urlParts = imageUrl.split('/organizations/');
+                if (urlParts.length > 1) {
+                    const filePath = urlParts[1];
+                    // remove any query params
+                    const cleanPath = filePath.split('?')[0];
+                    await supabase.storage.from('organizations').remove([cleanPath]);
+                }
+            } catch (e) {
+                console.error('Error cleaning up article image:', e);
+            }
+        }
+
+        const { error } = await supabase
+            .from('landing_articles')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error deleting landing article:', error);
+            throw error;
+        }
+    }
+};

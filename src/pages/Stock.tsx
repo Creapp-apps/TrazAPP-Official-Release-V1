@@ -1,0 +1,1607 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import React, { useState, useEffect } from 'react';
+import styled from 'styled-components';
+import { FaBoxes, FaPlus, FaChevronDown, FaEdit, FaTrash, FaTimes, FaHistory, FaHandHoldingMedical, FaFlask, FaCheckSquare, FaPrint } from 'react-icons/fa';
+import { dispensaryService, DispensaryBatch, DispensaryMovement } from '../services/dispensaryService';
+import { geneticsService } from '../services/geneticsService';
+import { Genetic } from '../types/genetics';
+import { LoadingSpinner } from '../components/LoadingSpinner';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { ToastModal } from '../components/ToastModal';
+import { AnimatedModal, CloseIcon } from '../components/AnimatedModal';
+import { CustomSelect } from '../components/CustomSelect';
+import { StockLabel } from '../components/StockLabel';
+import { useOrganization } from '../context/OrganizationContext';
+import { useReactToPrint } from 'react-to-print';
+
+const CollapsibleWrapper = ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) => {
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<string | number>(0);
+
+  useEffect(() => {
+    if (isOpen) {
+      setHeight(contentRef.current?.scrollHeight || 'auto');
+    } else {
+      setHeight(0);
+    }
+  }, [isOpen, children]);
+
+  return (
+    <div
+      style={{
+        height: isOpen ? height : 0,
+        opacity: isOpen ? 1 : 0,
+        overflow: 'hidden',
+        transition: 'height 0.3s ease, opacity 0.3s ease',
+      }}
+    >
+      <div ref={contentRef}>{children}</div>
+    </div>
+  );
+};
+
+// --- Styled Components ---
+
+const PageContainer = styled.div`
+  padding: 1rem;
+  padding-top: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+
+  @media (max-width: 768px) {
+    padding: 0.5rem;
+    padding-top: 4rem;
+  }
+`;
+
+const Header = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+
+  h1 {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+`;
+
+const ActionButton = styled.button<{ variant?: 'primary' | 'danger' | 'secondary' | 'ghost' | 'info' }>`
+  background: ${props =>
+    props.variant === 'primary' ? 'rgba(74, 222, 128, 0.2)' :
+      props.variant === 'danger' ? 'rgba(239, 68, 68, 0.2)' :
+        props.variant === 'info' ? 'rgba(56, 189, 248, 0.2)' :
+          props.variant === 'secondary' ? 'rgba(30, 41, 59, 0.6)' : 'transparent'};
+  color: ${props =>
+    props.variant === 'primary' ? '#4ade80' :
+      props.variant === 'danger' ? '#f87171' :
+        props.variant === 'info' ? '#38bdf8' :
+          props.variant === 'secondary' ? '#cbd5e1' : '#cbd5e1'};
+  border: ${props =>
+    props.variant === 'primary' ? '1px solid rgba(74, 222, 128, 0.5)' :
+      props.variant === 'danger' ? '1px solid rgba(239, 68, 68, 0.5)' :
+        props.variant === 'info' ? '1px solid rgba(56, 189, 248, 0.5)' :
+          props.variant === 'secondary' ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid transparent'};
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+  box-shadow: ${props => props.variant === 'primary' ? '0 4px 6px rgba(0, 0, 0, 0.2)' : 'none'};
+  backdrop-filter: blur(8px);
+
+  &:hover {
+    transform: translateY(-2px);
+    opacity: 1;
+    background: ${props =>
+    props.variant === 'primary' ? 'rgba(74, 222, 128, 0.3)' :
+      props.variant === 'danger' ? 'rgba(239, 68, 68, 0.3)' :
+        props.variant === 'info' ? 'rgba(56, 189, 248, 0.3)' :
+          props.variant === 'secondary' ? 'rgba(255, 255, 255, 0.1)' :
+            props.variant === 'ghost' ? 'rgba(255, 255, 255, 0.05)' : undefined};
+    color: ${props => props.variant === 'secondary' ? '#f8fafc' : undefined};
+    box-shadow: ${props => props.variant === 'primary' ? '0 6px 8px rgba(0, 0, 0, 0.3)' : '0 2px 4px rgba(0,0,0,0.2)'};
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+`;
+const IconButton = styled.button<{ color: string }>`
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: ${props => {
+    switch (props.color) {
+      case '#38a169': return '#4ade80'; // Neon Green
+      case '#3182ce': return '#38bdf8'; // Light Blue
+      case '#805ad5': return 'var(--primary-color, #a855f7)'; // Purple
+      case '#e53e3e': return '#f87171'; // Red
+      default: return props.color;
+    }
+  }};
+  width: 32px;
+  height: 32px;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  backdrop-filter: blur(8px);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+`;
+
+const StatsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+`;
+
+const StatCard = styled.div`
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  text-align: left;
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+
+  &:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  }
+
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #f8fafc;
+    margin-bottom: 0.25rem;
+    line-height: 1.2;
+  }
+
+  .stat-label {
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+`;
+
+const TableContainer = styled.div`
+  background: rgba(15, 23, 42, 0.75);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  /* Changed from overflow: hidden to allow dropdowns to bleed out visually */
+  /* If horizontal scrolling is needed, we wrap the table in a secondary div, but for Stock it fits. */
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);
+  backdrop-filter: blur(12px);
+
+  @media (max-width: 768px) {
+    overflow-x: auto;
+    /* This allows the table to scroll horizontally, but can still clip dropdowns */
+    /* To fix clipping of the last column dropdowns, adding padding right helps */
+    padding-right: 1px;
+    border-radius: 0.5rem;
+  }
+`;
+
+const MainTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+
+  th {
+    padding: 1rem;
+    text-align: left;
+    background: rgba(30, 41, 59, 0.6);
+    color: #94a3b8;
+    font-weight: 600;
+    font-size: 0.85rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  td {
+    padding: 1rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    vertical-align: middle;
+    font-size: 0.85rem;
+  }
+  
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  @media (max-width: 768px) {
+    th, td {
+      padding: 0.75rem 0.5rem;
+      font-size: 0.75rem;
+    }
+  }
+`;
+
+const ExpandedRow = styled.tr<{ $expanded?: boolean }>`
+  background: rgba(30, 41, 59, 0.4);
+  
+  td {
+    padding: 0 !important;
+    border-bottom: ${props => props.$expanded ? '1px solid rgba(255, 255, 255, 0.05)' : 'none'};
+    transition: border-bottom 0.3s ease;
+  }
+`;
+
+const DetailTable = styled.table`
+  width: 100%;
+  background: transparent;
+  
+  td {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: #e2e8f0;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  @media (max-width: 768px) {
+    td {
+      padding: 0.5rem;
+      font-size: 0.75rem;
+    }
+  }
+`;
+
+
+
+
+
+
+
+
+
+
+
+const ActionMenuContainer = styled.div`
+  position: relative;
+  display: inline-block;
+`;
+
+const ActionMenuToggle = styled.button`
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  width: 32px;
+  height: 32px;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  backdrop-filter: blur(8px);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
+  }
+`;
+
+const ActionMenuDropdown = styled.div<{ $isOpen: boolean }>`
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  min-width: 180px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  z-index: 100; /* Increased to ensure it's above everything */
+  display: ${props => props.$isOpen ? 'flex' : 'none'};
+  flex-direction: column;
+  padding: 0.5rem 0;
+  animation: fadeIn 0.2s ease-out;
+
+  /* Crucial for mobile: Ensure it drops to the left and doesn't push viewport width */
+  @media (max-width: 768px) {
+    right: 0; /* Anchors to the right edge of the toggle button */
+    left: auto; /* Ensure it never anchors left */
+    transform-origin: top right;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;
+
+const ActionMenuItem = styled.button<{ $color?: string }>`
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: ${props => props.$color || '#cbd5e1'};
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: background 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: ${props => props.$color || '#f8fafc'};
+  }
+`;
+
+const FormGroup = styled.div`
+  margin-bottom: 1.5rem;
+  label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: #cbd5e1;
+    font-size: 0.9rem;
+  }
+  input, select, textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.5rem;
+    font-size: 0.95rem;
+    color: #f8fafc;
+    background: rgba(30, 41, 59, 0.5);
+    backdrop-filter: blur(8px);
+    transition: all 0.2s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+
+    &:focus {
+      outline: none;
+      border-color: rgba(56, 189, 248, 0.5);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1);
+    }
+    &::placeholder {
+      color: #64748b;
+    }
+    
+    // Autofill Dark Mode override (Webkit specific)
+    &:-webkit-autofill,
+    &:-webkit-autofill:hover, 
+    &:-webkit-autofill:focus, 
+    &:-webkit-autofill:active {
+        -webkit-text-fill-color: #f8fafc !important;
+        -webkit-box-shadow: 0 0 0 9999px rgba(30,41,59,1) inset !important;
+        transition: background-color 5000s ease-in-out 0s;
+    }
+  }
+`;
+
+// --- Interfaces ---
+interface SubGroup {
+  groupName: string;
+  batches: DispensaryBatch[];
+  totalWeight: number;
+  totalInitialWeight: number;
+  batchesCount: number;
+}
+
+interface AggregatedStock {
+  strain: string;
+  totalWeight: number;
+  totalInitialWeight: number;
+  batchesCount: number;
+  batches: DispensaryBatch[];
+  subGroups: SubGroup[];
+}
+
+const Stock: React.FC = () => {
+  const { currentOrganization } = useOrganization();
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Print Setup
+  const printLabelRef = React.useRef<HTMLDivElement>(null);
+  const [printingBatch, setPrintingBatch] = useState<DispensaryBatch | null>(null);
+  const handlePrintLabel = useReactToPrint({ contentRef: printLabelRef });
+
+  const triggerPrint = (batch: DispensaryBatch) => {
+    setPrintingBatch(batch);
+    setTimeout(() => {
+      handlePrintLabel();
+    }, 100);
+  };
+
+  // Data State
+  const [genetics, setGenetics] = useState<Genetic[]>([]);
+  const [aggregatedStock, setAggregatedStock] = useState<AggregatedStock[]>([]);
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const [modalUnitsData, setModalUnitsData] = useState<{ isOpen: boolean, originName: string, batches: DispensaryBatch[] }>({ isOpen: false, originName: '', batches: [] });
+
+  // Close ActionMenu on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      // Very simple way to close menu if clicking anywhere else
+      if (!(e.target as Element).closest('button[title="Opciones"]')) {
+        setOpenActionMenuId(null);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, []);
+
+  // Expandable Rows State
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleRow = (strainName: string) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(strainName)) {
+      newExpanded.delete(strainName);
+    } else {
+      newExpanded.add(strainName);
+    }
+    setExpandedRows(newExpanded);
+  };
+
+  // History State
+  const [movements, setMovements] = useState<DispensaryMovement[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // Modal States
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingBatch, setEditingBatch] = useState<DispensaryBatch | null>(null);
+
+  // Form States
+  const [newBatch, setNewBatch] = useState({
+    strain_name: '',
+    initial_weight: '',
+    batch_code: '',
+    quality_grade: 'Standard',
+    location: 'Depósito General',
+    notes: ''
+  });
+
+  const [editForm, setEditForm] = useState({
+    current_weight: '',
+    quality_grade: 'Standard',
+    location: '',
+    notes: '',
+    reason: '',
+    movementType: 'adjustment'
+  });
+
+  // Dispense to Shop
+  const [isDispenseToShopOpen, setIsDispenseToShopOpen] = useState(false);
+  const [dispenseToShopBatch, setDispenseToShopBatch] = useState<DispensaryBatch | null>(null);
+  const [dispenseToShopAmount, setDispenseToShopAmount] = useState('');
+
+  // Delete Prompt
+  const [deleteData, setDeleteData] = useState<{ batch: DispensaryBatch | { strain_name: string }, reason: string, isBulk?: boolean } | null>(null);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false); // Custom small modal for reason
+
+  // Selection State
+  const [selectedBatches, setSelectedBatches] = useState<Set<string>>(new Set());
+
+  const toggleBatchSelection = (batchId: string) => {
+    const newSet = new Set(selectedBatches);
+    if (newSet.has(batchId)) newSet.delete(batchId);
+    else newSet.add(batchId);
+    setSelectedBatches(newSet);
+  };
+
+  const toggleSelectAllStrain = (strainBatches: DispensaryBatch[]) => {
+    const allSelected = strainBatches.every(b => selectedBatches.has(b.id));
+    const newSet = new Set(selectedBatches);
+
+    if (allSelected) {
+      strainBatches.forEach(b => newSet.delete(b.id));
+    } else {
+      strainBatches.forEach(b => newSet.add(b.id));
+    }
+    setSelectedBatches(newSet);
+  };
+
+  const deleteSelected = async () => {
+    if (selectedBatches.size === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Eliminación Masiva',
+      message: `¿Estás seguro de eliminar ${selectedBatches.size} lotes seleccionados? Esta acción no se puede deshacer.`,
+      isDanger: true,
+      onConfirm: async () => {
+        // Set loading state in modal if possible, or use a local state that the modal observes
+        // Since ConfirmModal state doesn't have isLoading, let's update the modal message or title to indicate progress?
+        // Better: Update the ConfirmModal component to accept isLoading, but first let's see if we can hack it or need to change the component.
+        // Actually, looking at the code, I can't easily change the ConfirmModal *implementation* from here if it's imported.
+        // BUT, looking at lines 956+, it seems ConfirmModal is hardcoded in this file?
+        // Wait, line 303 defines setConfirmModal state.
+        // Let's modify the onConfirm to update the modal content to "Eliminando..." before starting.
+
+        setConfirmModal(prev => ({ ...prev, title: 'Eliminando...', message: 'Por favor espere mientras se eliminan los lotes...', isDanger: false }));
+
+        // Small delay to let UI update
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        let successCount = 0;
+        const batchesToDelete = Array.from(selectedBatches);
+        for (const id of batchesToDelete) {
+          const ok = await dispensaryService.deleteBatchWithReason(id, "Eliminación masiva por selección");
+          if (ok) successCount++;
+        }
+
+        if (successCount > 0) {
+          showToast(`Se eliminaron ${successCount} lotes.`, 'success');
+          setSelectedBatches(new Set());
+          loadData();
+        } else {
+          showToast("Error al eliminar.", 'error');
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  // ... (existing code)
+
+
+  // Feedback States
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => { },
+    isDanger: false
+  });
+
+  const [toast, setToast] = useState({
+    isOpen: false,
+    message: '',
+    type: 'info' as 'success' | 'error' | 'info'
+  });
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ isOpen: true, message, type });
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    const startTime = Date.now();
+    const [batches, geneticsList] = await Promise.all([
+      dispensaryService.getBatches(),
+      geneticsService.getGenetics()
+    ]);
+
+    setGenetics(geneticsList as Genetic[]);
+
+    // Aggregate Data
+    const items: { [key: string]: AggregatedStock } = {};
+
+    const getGroupName = (batch: DispensaryBatch) => {
+      if (batch.notes && batch.notes.startsWith('Finalizado desde Secado. ')) {
+        return batch.notes.replace('Finalizado desde Secado. ', '').trim();
+      }
+      if (batch.location === 'Dispensario / Shop') return "Dispensario / Shop";
+      if (batch.location === 'Laboratorio') return "Laboratorio";
+      return batch.batch_code || 'Lote Sin Nombre';
+    };
+
+    batches.forEach(b => {
+      // 1. Group by Genetic (Level 1)
+      const strainName = b.strain_name || 'Sin Genética';
+      if (!items[strainName]) {
+        items[strainName] = { strain: strainName, totalWeight: 0, totalInitialWeight: 0, batchesCount: 0, batches: [], subGroups: [] };
+      }
+      items[strainName].totalWeight += b.current_weight;
+      items[strainName].totalInitialWeight += b.initial_weight || b.current_weight;
+      items[strainName].batchesCount += 1;
+      items[strainName].batches.push(b); // Keeping for backward compatibility 
+
+      // 2. Group by Lote Origen (Level 2)
+      const groupName = getGroupName(b);
+      let subGroup = items[strainName].subGroups.find(sg => sg.groupName === groupName);
+      if (!subGroup) {
+        subGroup = { groupName, batches: [], totalWeight: 0, totalInitialWeight: 0, batchesCount: 0 };
+        items[strainName].subGroups.push(subGroup);
+      }
+      subGroup.totalWeight += b.current_weight;
+      subGroup.totalInitialWeight += b.initial_weight || b.current_weight;
+      subGroup.batchesCount += 1;
+      subGroup.batches.push(b);
+    });
+
+    setAggregatedStock(Object.values(items).sort((a, b) => b.totalWeight - a.totalWeight));
+
+
+
+    setIsLoading(false);
+  };
+
+  const loadMovements = async () => {
+    const data = await dispensaryService.getMovements(50);
+    setMovements(data);
+  };
+
+  const handleOpenHistory = () => {
+    loadMovements();
+    setIsHistoryOpen(true);
+  };
+
+  // --- Actions ---
+
+  const handleCreateBatch = async () => {
+    if (!newBatch.strain_name || !newBatch.initial_weight) {
+      showToast("Faltan campos obligatorios.", 'error');
+      return;
+    }
+
+    let code = newBatch.batch_code;
+    if (!code) {
+      const date = new Date();
+      code = `MAN - ${date.getFullYear()} -${Math.floor(Math.random() * 1000).toString().padStart(3, '0')} `;
+    }
+
+    const batchData: any = {
+      strain_name: newBatch.strain_name,
+      batch_code: code,
+      initial_weight: parseFloat(newBatch.initial_weight),
+      quality_grade: newBatch.quality_grade,
+      status: 'curing',
+      location: newBatch.location,
+      notes: newBatch.notes || 'Carga Manual'
+    };
+
+    const created = await dispensaryService.createBatch(batchData);
+    if (created) {
+      showToast("Lote creado exitosamente.", 'success');
+      setIsCreateOpen(false);
+      setNewBatch({ strain_name: '', initial_weight: '', batch_code: '', quality_grade: 'Standard', location: 'Depósito General', notes: '' });
+      loadData();
+    } else {
+      showToast("Error al crear el lote.", 'error');
+    }
+  };
+
+  const openEdit = (batch: DispensaryBatch) => {
+    setEditingBatch(batch);
+    setEditForm({
+      current_weight: batch.current_weight.toString(),
+      quality_grade: batch.quality_grade,
+      location: batch.location,
+      notes: batch.notes || '',
+      reason: '',
+      movementType: 'adjustment'
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleUpdateBatch = async () => {
+    if (!editingBatch) return;
+
+    if (!editForm.reason || editForm.reason.trim().length < 3) {
+      showToast("Debes especificar un motivo válido.", 'error');
+      return;
+    }
+
+    const updates: Partial<DispensaryBatch> = {
+      current_weight: parseFloat(editForm.current_weight),
+      notes: editForm.notes
+    };
+
+    const success = await dispensaryService.updateBatchWithReason(editingBatch.id, updates, editForm.reason, editForm.movementType as any);
+    if (success) {
+      showToast("Lote actualizado.", 'success');
+      setIsEditOpen(false);
+      setEditingBatch(null);
+      loadData();
+    } else {
+      showToast("Error al actualizar.", 'error');
+    }
+  };
+
+  const initDelete = (batch: DispensaryBatch) => {
+    setDeleteData({ batch, reason: '', isBulk: false });
+    setIsDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteData) return;
+    if (!deleteData.reason || deleteData.reason.trim().length < 3) {
+      showToast("Debes especificar el motivo de eliminación.", 'error');
+      return;
+    }
+
+    if (deleteData.isBulk) {
+      const strainName = (deleteData.batch as any).strain_name;
+      const targetBatches = aggregatedStock.find(item => item.strain === strainName)?.batches || [];
+
+      const batchIds = targetBatches.map(b => b.id);
+      const success = await dispensaryService.deleteBatchesWithReason(batchIds, deleteData.reason);
+
+      if (success) {
+        showToast(`Se eliminaron todos los lotes de ${strainName}.`, 'success');
+        loadData();
+        setIsDeleteOpen(false);
+        setDeleteData(null);
+      } else {
+        showToast("Error al eliminar lotes.", 'error');
+      }
+
+    } else {
+      const success = await dispensaryService.deleteBatchWithReason((deleteData.batch as DispensaryBatch).id, deleteData.reason);
+      if (success) {
+        showToast("Lote dado de baja.", 'success');
+        loadData();
+        setIsDeleteOpen(false);
+        setDeleteData(null);
+      } else {
+        showToast("Error al eliminar.", 'error');
+      }
+    }
+  };
+
+  // Laboratory Transfer
+  const [isLabTransferOpen, setIsLabTransferOpen] = useState(false);
+  const [labTransferBatch, setLabTransferBatch] = useState<DispensaryBatch | null>(null);
+  const [labTransferAmount, setLabTransferAmount] = useState('');
+
+
+
+  const confirmLabTransfer = async () => {
+    if (!labTransferBatch || !labTransferAmount) return;
+    const amount = parseFloat(labTransferAmount);
+    if (isNaN(amount) || amount <= 0 || amount > labTransferBatch.current_weight) {
+      showToast("Cantidad inválida.", 'error');
+      return;
+    }
+
+    const success = await dispensaryService.transferToLab(labTransferBatch.id, amount);
+    if (success) {
+      showToast("Enviado al Laboratorio.", 'success');
+      setIsLabTransferOpen(false);
+      setLabTransferBatch(null);
+      loadData();
+    } else {
+      showToast("Error al enviar al laboratorio.", 'error');
+    }
+  };
+
+  // Group Dispense
+  const [isGroupDispenseOpen, setIsGroupDispenseOpen] = useState(false);
+  const [groupDispenseStrain, setGroupDispenseStrain] = useState<string | null>(null);
+  const [groupDispenseAmount, setGroupDispenseAmount] = useState('');
+
+  const confirmGroupDispense = async () => {
+    if (!groupDispenseStrain || !groupDispenseAmount) return;
+    const amountToDispense = parseFloat(groupDispenseAmount);
+
+    if (isNaN(amountToDispense) || amountToDispense <= 0) {
+      showToast("Cantidad inválida.", 'error');
+      return;
+    }
+
+    const itemGroup = aggregatedStock.find(i => i.strain === groupDispenseStrain);
+    if (!itemGroup) return;
+
+    if (amountToDispense > itemGroup.totalWeight) {
+      showToast(`El stock máximo disponible es ${itemGroup.totalWeight}g.`, 'error');
+      return;
+    }
+
+    // Quick Loading State hack: change text/disable
+    const btn = document.activeElement as HTMLButtonElement;
+    if (btn) { btn.disabled = true; btn.innerText = "Procesando..."; }
+
+    // Logic: Sort batches by oldest created_at, then deduct sequentially
+    const sortedBatches = [...itemGroup.batches].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    let remainingToDispense = amountToDispense;
+
+    const deductions = [];
+    for (const batch of sortedBatches) {
+      if (remainingToDispense <= 0) break;
+      if (batch.current_weight <= 0) continue;
+
+      const deductAmount = Math.min(batch.current_weight, remainingToDispense);
+      deductions.push({ batchId: batch.id, amount: deductAmount });
+      remainingToDispense -= deductAmount;
+    }
+
+    const success = await dispensaryService.bulkDispenseToShop(deductions, groupDispenseStrain);
+
+    if (success) {
+      showToast(`Se dispensaron ${amountToDispense}g exitosamente de ${deductions.length} lote(s).`, 'success');
+      setIsGroupDispenseOpen(false);
+      setGroupDispenseAmount('');
+      setGroupDispenseStrain(null);
+      loadData();
+    } else {
+      showToast(`Error al enviar el stock masivamente.`, 'error');
+      loadData();
+    }
+  };
+
+  // Shop Dispense (Keeping these for legacy/other flows if needed, though replaced by Group Dispense in some contexts)
+
+  const openDispenseToShop = (batch: DispensaryBatch) => {
+    setDispenseToShopBatch(batch);
+    setDispenseToShopAmount('');
+    setIsDispenseToShopOpen(true);
+  };
+
+  const confirmDispenseToShop = async () => {
+    if (!dispenseToShopBatch || !dispenseToShopAmount) return;
+    const amount = parseFloat(dispenseToShopAmount);
+    if (isNaN(amount) || amount <= 0 || amount > dispenseToShopBatch.current_weight) {
+      showToast("Cantidad inválida.", 'error');
+      return;
+    }
+
+    const success = await dispensaryService.dispenseToShop(dispenseToShopBatch.id, amount);
+    if (success) {
+      showToast("Enviado al Dispensario.", 'success');
+      setIsDispenseToShopOpen(false);
+      setDispenseToShopBatch(null);
+      loadData();
+    } else {
+      showToast("Error al enviar.", 'error');
+    }
+  };
+
+  // Group Lab Transfer
+  const [isGroupLabOpen, setIsGroupLabOpen] = useState(false);
+  const [groupLabStrain, setGroupLabStrain] = useState<string | null>(null);
+  const [groupLabAmount, setGroupLabAmount] = useState('');
+
+  const openGroupLabTransfer = (strain: string) => {
+    const group = aggregatedStock.find(g => g.strain === strain);
+    if (!group || !group.batches.length) {
+      showToast("No hay lotes disponibles.", 'error');
+      return;
+    }
+
+    setGroupLabStrain(strain);
+    setGroupLabAmount('');
+    setIsGroupLabOpen(true);
+  };
+
+  const confirmGroupLabTransfer = async () => {
+    if (!groupLabStrain || !groupLabAmount) return;
+    const amountToTransfer = parseFloat(groupLabAmount);
+
+    if (isNaN(amountToTransfer) || amountToTransfer <= 0) {
+      showToast("Cantidad inválida.", 'error');
+      return;
+    }
+
+    const itemGroup = aggregatedStock.find(i => i.strain === groupLabStrain);
+    if (!itemGroup) return;
+
+    if (amountToTransfer > itemGroup.totalWeight) {
+      showToast(`El stock máximo disponible es ${itemGroup.totalWeight}g.`, 'error');
+      return;
+    }
+
+    // Quick Loading State hack: change text/disable
+    const btn = document.activeElement as HTMLButtonElement;
+    if (btn) { btn.disabled = true; btn.innerText = "Procesando..."; }
+
+    // Logic: Sort batches by oldest created_at, then deduct sequentially
+    const sortedBatches = [...itemGroup.batches].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    let remainingToTransfer = amountToTransfer;
+    const deductions = [];
+
+    for (const batch of sortedBatches) {
+      if (remainingToTransfer <= 0) break;
+      if (batch.current_weight <= 0) continue;
+
+      const transferAmount = Math.min(batch.current_weight, remainingToTransfer);
+      deductions.push({ batchId: batch.id, amount: transferAmount });
+      remainingToTransfer -= transferAmount;
+    }
+
+    const success = await dispensaryService.bulkTransferToLab(deductions, groupLabStrain);
+
+    if (success) {
+      showToast(`Enviados ${amountToTransfer}g al Laboratorio desde ${deductions.length} lote(s).`, 'success');
+      setIsGroupLabOpen(false);
+      setGroupLabStrain(null);
+      setGroupLabAmount('');
+      loadData();
+    } else {
+      showToast("Error al enviar lotes al Laboratorio.", 'error');
+    }
+  };
+
+  const handleGroupDispense = (strainName: string) => {
+    const item = aggregatedStock.find(i => i.strain === strainName);
+    if (!item || !item.batches.length) {
+      showToast("No hay lotes disponibles para dispensar.", 'error');
+      return;
+    }
+    setGroupDispenseStrain(strainName);
+    setGroupDispenseAmount('');
+    setIsGroupDispenseOpen(true);
+  };
+
+  // Stats
+  // Build a filtered list for display that EXCLUDES 'Laboratorio' items, assuming they shouldn't be in main stock (or maybe they should be separate?)
+  // For now, let's keep showing everything but maybe add a filter toggle later.
+  // Wait, if we move to Lab, the location changes to 'Laboratorio'. 
+  // We might want to filter those out if this page is purely for "Warehouse/Shop" stock?
+  // User didn't specify, but usually moving to Lab means it leaves the general stock.
+  // The service default `getBatches` returns all except depleted.
+  // Let's filter out 'Laboratorio' location from the main list so it doesn't double count if we have a Lab page.
+
+
+  // Re-calculate stats based on filtered list? Or Global?
+  // Let's use the full list for "Total Assets" but maybe the table should show available?
+  // Actually, better to just show everything for now.
+  // ...
+  // Re-reading plan: "Filter displayed stock to exclude items in 'Laboratorio'"
+  // Okay, let's filter.
+
+  const visibleStock = aggregatedStock.map(group => {
+    const visibleBatches = group.batches.filter(b => b.location !== 'Laboratorio');
+    return {
+      ...group,
+      batches: visibleBatches,
+      totalWeight: visibleBatches.reduce((sum, b) => sum + b.current_weight, 0),
+      totalInitialWeight: visibleBatches.reduce((sum, b) => sum + (b.initial_weight || b.current_weight), 0),
+      batchesCount: visibleBatches.length
+    };
+  }).filter(g => g.batches.length > 0).sort((a, b) => b.totalWeight - a.totalWeight);
+
+
+  const totalWeight = visibleStock.reduce((acc, curr) => acc + curr.totalWeight, 0);
+  const activeBatchesCount = visibleStock.reduce((acc, curr) => acc + curr.batchesCount, 0);
+
+  return (
+    <PageContainer>
+      <Header>
+        <h1><FaBoxes /> Stock & Inventario</h1>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <ActionButton variant="info" onClick={handleOpenHistory}>
+            <FaHistory /> Historial
+          </ActionButton>
+          <ActionButton variant="primary" onClick={() => setIsCreateOpen(true)}>
+            <FaPlus /> Nuevo Lote Manual
+          </ActionButton>
+        </div>
+
+      </Header>
+
+      <StatsGrid>
+        <StatCard>
+          <div className="stat-value">{totalWeight.toFixed(1)}g</div>
+          <div className="stat-label">Total en Stock</div>
+        </StatCard>
+        <StatCard>
+          <div className="stat-value">{aggregatedStock.length}</div>
+          <div className="stat-label">Variedades</div>
+        </StatCard>
+        <StatCard>
+          <div className="stat-value">{activeBatchesCount}</div>
+          <div className="stat-label">Lotes Activos</div>
+        </StatCard>
+      </StatsGrid>
+
+      {isLoading ? (
+        <LoadingSpinner />
+      ) : (
+        <TableContainer>
+          <MainTable>
+            <thead>
+              <tr>
+                <th style={{ width: '40px' }}></th>
+                <th>GENÉTICA</th>
+                <th style={{ textAlign: 'right' }}>PESO TOTAL</th>
+                <th style={{ textAlign: 'right' }}>UNIDADES</th>
+                <th style={{ textAlign: 'center' }}>% TOTAL</th>
+                <th style={{ width: '120px', textAlign: 'right' }}>ACCIONES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleStock.map((item) => {
+                const percent = item.totalInitialWeight > 0 ? (item.totalWeight / item.totalInitialWeight * 100).toFixed(1) : '0';
+                const isExpanded = expandedRows.has(item.strain);
+
+                return (
+                  <React.Fragment key={item.strain}>
+                    <tr
+                      style={{ background: isExpanded ? 'rgba(30, 41, 59, 0.4)' : 'transparent', transition: 'background 0.2s', cursor: 'pointer' }}
+                      onClick={() => toggleRow(item.strain)}
+                    >
+                      <td style={{ textAlign: 'center', color: '#94a3b8' }}>
+                        <FaChevronDown style={{
+                          opacity: 0.5,
+                          transform: isExpanded ? 'rotate(180deg)' : 'rotate(-90deg)',
+                          transition: 'transform 0.2s ease'
+                        }} />
+                      </td>
+                      <td style={{ fontWeight: 'bold' }}>{item.strain}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 'bold', color: '#f8fafc' }}>{item.totalWeight.toFixed(1)}g</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <span style={{ background: 'rgba(255, 255, 255, 0.1)', padding: '2px 8px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                          {item.batchesCount}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center', fontSize: '0.85rem', color: '#cbd5e1' }}>{percent}%</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <ActionMenuContainer onClick={(e) => e.stopPropagation()}>
+                          <ActionMenuToggle onClick={() => setOpenActionMenuId(openActionMenuId === item.strain ? null : item.strain)} title="Opciones">
+                            <span style={{ fontSize: '1.2rem', lineHeight: 0, paddingBottom: '4px' }}>...</span>
+                          </ActionMenuToggle>
+                          <ActionMenuDropdown $isOpen={openActionMenuId === item.strain}>
+                            <ActionMenuItem $color="#4ade80" onClick={() => {
+                              setOpenActionMenuId(null);
+                              handleGroupDispense(item.strain);
+                            }}>
+                              <FaHandHoldingMedical /> Dispensar
+                            </ActionMenuItem>
+                            <ActionMenuItem $color="#38bdf8" onClick={() => {
+                              setOpenActionMenuId(null);
+                              showToast("Edición masiva de genética próximamente.", 'info');
+                            }}>
+                              <FaEdit /> Editar Genética
+                            </ActionMenuItem>
+                            <ActionMenuItem $color="var(--primary-color, #a855f7)" onClick={() => {
+                              setOpenActionMenuId(null);
+                              openGroupLabTransfer(item.strain);
+                            }}>
+                              <FaFlask /> Enviar a Laboratorio
+                            </ActionMenuItem>
+                            <ActionMenuItem $color="#f87171" onClick={() => {
+                              setOpenActionMenuId(null);
+                              setDeleteData({ batch: { strain_name: item.strain }, reason: '', isBulk: true });
+                              setIsDeleteOpen(true);
+                            }}>
+                              <FaTrash /> Eliminar Todos
+                            </ActionMenuItem>
+                          </ActionMenuDropdown>
+                        </ActionMenuContainer>
+                      </td>
+                    </tr>
+
+                    {/* Sub-batches Accordion (Level 2: Origin Batches) */}
+                    <ExpandedRow $expanded={isExpanded}>
+                      <td colSpan={6}>
+                        <CollapsibleWrapper isOpen={isExpanded}>
+                          <div style={{ padding: '1rem', background: 'rgba(15, 23, 42, 0.4)', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                            <DetailTable>
+                              <thead>
+                                <tr>
+                                  <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'left', fontWeight: 600 }}>LOTE ORIGEN / AGRUPACIÓN</th>
+                                  <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'left', fontWeight: 600 }}>INGRESO</th>
+                                  <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>PESO ACTUAL / INICIAL</th>
+                                  <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>CANT. UNIDADES</th>
+                                  <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>ACCIONES</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {item.subGroups.map((subGroup, idx) => (
+                                  <tr key={idx}>
+                                    <td style={{ fontWeight: 600, color: '#38bdf8' }}>{subGroup.groupName}</td>
+                                    <td style={{ color: '#cbd5e1' }}>{new Date(subGroup.batches[0]?.created_at || Date.now()).toLocaleDateString()}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                      {subGroup.totalWeight.toFixed(1)}g <span style={{ color: '#64748b', fontWeight: 'normal' }}>/ {subGroup.totalInitialWeight.toFixed(1)}g</span>
+                                    </td>
+                                    <td style={{ textAlign: 'right', color: '#cbd5e1' }}>{subGroup.batchesCount} u.</td>
+                                    <td style={{ textAlign: 'right' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                                        <ActionButton variant="info" style={{ padding: '0.25rem 0.75rem', fontSize: '0.8rem' }} onClick={(e) => {
+                                          e.stopPropagation();
+                                          setModalUnitsData({
+                                            isOpen: true,
+                                            originName: subGroup.groupName,
+                                            batches: subGroup.batches
+                                          });
+                                        }}>
+                                          <FaBoxes /> Ver Unidades
+                                        </ActionButton>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </DetailTable>
+                          </div>
+                        </CollapsibleWrapper>
+                      </td>
+                    </ExpandedRow>
+                  </React.Fragment>
+                );
+              })}
+              {visibleStock.length === 0 && (
+                <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>No hay stock disponible.</td></tr>
+              )}
+            </tbody>
+          </MainTable>
+        </TableContainer>
+      )
+      }
+
+      {/* CREATE MODAL */}
+      <AnimatedModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)}>
+        <CloseIcon onClick={() => setIsCreateOpen(false)}><FaTimes /></CloseIcon>
+        <h2 style={{ marginBottom: '1.5rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FaPlus /> Nuevo Lote Manual
+        </h2>
+        <FormGroup style={{ zIndex: 20 }}>
+          <label>Genética</label>
+          <CustomSelect
+            value={newBatch.strain_name}
+            onChange={(val) => setNewBatch({ ...newBatch, strain_name: val })}
+            options={genetics.map(g => ({ value: g.name, label: g.name }))}
+            placeholder="Seleccionar Genética..."
+          />
+        </FormGroup>
+        <FormGroup>
+          <label>Peso Inicial (g)</label>
+          <input
+            type="number"
+            value={newBatch.initial_weight}
+            onChange={e => setNewBatch({ ...newBatch, initial_weight: e.target.value })}
+            placeholder="0.00"
+          />
+        </FormGroup>
+        {/* ... other fields similar to previous edit ... */}
+        {/* Quality and Location inputs removed */}
+        <FormGroup>
+          <label>Notas</label>
+          <textarea value={newBatch.notes} onChange={e => setNewBatch({ ...newBatch, notes: e.target.value })} rows={2} />
+        </FormGroup>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
+          <ActionButton variant="secondary" onClick={() => setIsCreateOpen(false)}>Cancelar</ActionButton>
+          <ActionButton variant="primary" onClick={handleCreateBatch}>Crear Lote</ActionButton>
+        </div>
+      </AnimatedModal>
+
+      {/* EDIT MODAL */}
+      <AnimatedModal isOpen={isEditOpen} onClose={() => setIsEditOpen(false)}>
+        {editingBatch && (
+          <>
+            <CloseIcon onClick={() => setIsEditOpen(false)}><FaTimes /></CloseIcon>
+            <h2 style={{ marginBottom: '1rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <FaEdit /> Editar Lote: {editingBatch.batch_code}
+            </h2>
+
+            <FormGroup>
+              <label>Peso Actual (g) <small style={{ fontWeight: 'normal', color: '#718096' }}>(Control Manual)</small></label>
+              <input type="number" value={editForm.current_weight} onChange={e => setEditForm({ ...editForm, current_weight: e.target.value })} />
+            </FormGroup>
+
+            <FormGroup>
+              <label>Tipo de Movimiento</label>
+              <select value={editForm.movementType} onChange={e => setEditForm({ ...editForm, movementType: e.target.value })}>
+                <option value="adjustment">Ajuste (Corrección)</option>
+                <option value="dispense">Venta</option>
+                <option value="quality_test">Muestra / Test</option>
+                <option value="restock">Ingreso / Devolución</option>
+              </select>
+            </FormGroup>
+
+            <FormGroup>
+              <label style={{ color: '#e53e3e' }}>Motivo del Cambio (Requerido)</label>
+              <input
+                type="text"
+                value={editForm.reason}
+                onChange={e => setEditForm({ ...editForm, reason: e.target.value })}
+                placeholder="Ej: Ajuste por merma, Error de carga..."
+                style={{ borderColor: '#fc8181' }}
+              />
+            </FormGroup>
+
+            {/* Quality and Location inputs removed */}
+            <FormGroup>
+              <label>Notas</label>
+              <textarea value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} rows={2} />
+            </FormGroup>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
+              <ActionButton variant="secondary" onClick={() => setIsEditOpen(false)}>Cancelar</ActionButton>
+              <ActionButton variant="primary" onClick={handleUpdateBatch}>Guardar Cambios</ActionButton>
+            </div>
+          </>
+        )}
+      </AnimatedModal>
+
+      {/* DELETE REASON MODAL */}
+      <AnimatedModal isOpen={isDeleteOpen} onClose={() => setIsDeleteOpen(false)}>
+        {deleteData && (
+          <>
+            <CloseIcon onClick={() => setIsDeleteOpen(false)}><FaTimes /></CloseIcon>
+            <h2 style={{ marginBottom: '1rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <FaTrash /> {deleteData.isBulk ? 'Eliminación Masiva' : 'Baja de Lote'}
+            </h2>
+            <p style={{ marginBottom: '1rem' }}>
+              {deleteData.isBulk ? (
+                <>Estás por eliminar <strong>TODOS</strong> los lotes de la genética <strong>{(deleteData.batch as any).strain_name}</strong>.</>
+              ) : (
+                <>Estás por eliminar el lote <strong>{(deleteData.batch as DispensaryBatch).batch_code}</strong>. Esta acción dará de baja todo el stock restante ({(deleteData.batch as DispensaryBatch).current_weight}g).</>
+              )}
+            </p>
+            <FormGroup>
+              <label>Motivo de Baja (Requerido)</label>
+              <textarea
+                value={deleteData.reason}
+                onChange={e => setDeleteData({ ...deleteData, reason: e.target.value })}
+                rows={3}
+                placeholder="Ej: Hongos, Error administrativo, Consumo interno..."
+                style={{ borderColor: '#fc8181' }}
+              />
+            </FormGroup>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
+              <ActionButton variant="secondary" onClick={() => setIsDeleteOpen(false)}>Cancelar</ActionButton>
+              <ActionButton variant="danger" onClick={confirmDelete}>Confirmar Baja</ActionButton>
+            </div>
+          </>
+        )}
+      </AnimatedModal>
+
+      {/* GLOBAL CONFIRM MODAL */}
+      {
+        confirmModal.isOpen && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.95)', padding: '2rem', borderRadius: '1rem',
+              width: '90%', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
+              border: '1px solid rgba(255, 255, 255, 0.1)', backdropFilter: 'blur(16px)'
+            }}>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: confirmModal.isDanger ? '#f87171' : '#f8fafc' }}>
+                {confirmModal.title}
+              </h3>
+              <p style={{ marginBottom: '1.5rem', color: '#cbd5e1' }}>{confirmModal.message}</p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                <ActionButton variant="secondary" onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}>
+                  Cancelar
+                </ActionButton>
+                <ActionButton
+                  variant={confirmModal.isDanger ? 'danger' : 'primary'}
+                  onClick={async () => {
+                    // Quick Loading State hack: change text/disable
+                    const btn = document.activeElement as HTMLButtonElement;
+                    if (btn) { btn.disabled = true; btn.innerText = "Procesando..."; }
+                    await confirmModal.onConfirm();
+                    setConfirmModal({ ...confirmModal, isOpen: false });
+                  }}
+                >
+                  Confirmar
+                </ActionButton>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* HISTORY MODAL */}
+      <AnimatedModal isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} wide>
+        <CloseIcon onClick={() => setIsHistoryOpen(false)}><FaTimes /></CloseIcon>
+        <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f8fafc' }}>
+          <FaHistory /> Historial de Movimientos
+        </h2>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+            <thead>
+              <tr style={{ background: 'rgba(30, 41, 59, 0.6)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', textAlign: 'left', color: '#cbd5e1' }}>
+                <th style={{ padding: '0.75rem' }}>Fecha</th>
+                <th style={{ padding: '0.75rem' }}>Tipo</th>
+                <th style={{ padding: '0.75rem' }}>Lote / Genética</th>
+                <th style={{ padding: '0.75rem', textAlign: 'right' }}>Cantidad</th>
+                <th style={{ padding: '0.75rem' }}>Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movements.map(mov => (
+                <tr key={mov.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', color: '#e2e8f0' }}>
+                  <td style={{ padding: '0.75rem' }}>{new Date(mov.created_at).toLocaleString()}</td>
+                  <td style={{ padding: '0.75rem' }}>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold',
+                      background: mov.type === 'dispense' ? 'rgba(74, 222, 128, 0.2)' : mov.type === 'adjustment' ? 'rgba(250, 204, 21, 0.2)' : mov.type === 'disposal' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+                      color: mov.type === 'dispense' ? '#4ade80' : mov.type === 'adjustment' ? '#facc15' : mov.type === 'disposal' ? '#f87171' : '#cbd5e1'
+                    }}>
+                      {{
+                        dispense: 'VENTA',
+                        adjustment: 'AJUSTE',
+                        disposal: 'BAJA',
+                        restock: 'INGRESO',
+                        quality_test: 'TEST'
+                      }[mov.type] || mov.type.toUpperCase()}
+                    </span>
+                  </td>
+                  <td style={{ padding: '0.75rem' }}>
+                    <strong>{mov.batch?.batch_code || '-'}</strong>
+                    <br />
+                    <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{mov.batch?.strain_name}</span>
+                  </td>
+                  <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 'bold', color: mov.amount > 0 ? '#4ade80' : '#f87171' }}>
+                    {mov.amount > 0 ? '+' : ''}{mov.amount}g
+                  </td>
+                  <td style={{ padding: '0.75rem', color: '#cbd5e1' }}>{mov.reason || '-'}</td>
+                </tr>
+              ))}
+              {movements.length === 0 && (
+                <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>No hay movimientos registrados.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </AnimatedModal>
+
+      {/* GROUP DISPENSE SELECTION MODAL (BULK) */}
+      <AnimatedModal isOpen={isGroupDispenseOpen} onClose={() => setIsGroupDispenseOpen(false)}>
+        {groupDispenseStrain && (() => {
+          const itemGroup = aggregatedStock.find(s => s.strain === groupDispenseStrain);
+          const maxAvailable = itemGroup ? itemGroup.totalWeight : 0;
+          return (
+            <>
+              <CloseIcon onClick={() => setIsGroupDispenseOpen(false)}><FaTimes /></CloseIcon>
+              <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#f8fafc' }}>
+                <FaHandHoldingMedical /> Dispensar: {groupDispenseStrain}
+              </h2>
+
+              <div style={{ marginBottom: '1.5rem', background: 'rgba(30, 41, 59, 0.6)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#cbd5e1' }}>Stock Total Disponible:</p>
+                <p style={{ margin: '0.25rem 0 0 0', fontWeight: 'bold', color: '#4ade80', fontSize: '1.25rem' }}>{maxAvailable.toFixed(2)}g</p>
+                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>Se descontará automáticamente de los lotes más antiguos primero.</p>
+              </div>
+
+              <FormGroup style={{ marginTop: '1rem' }}>
+                <label>Cantidad a Enviar (g)</label>
+                <input
+                  type="number"
+                  autoFocus
+                  value={groupDispenseAmount}
+                  onChange={e => setGroupDispenseAmount(e.target.value)}
+                  placeholder="0.00"
+                  max={maxAvailable}
+                />
+              </FormGroup>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
+                <ActionButton variant="secondary" onClick={() => setIsGroupDispenseOpen(false)}>Cancelar</ActionButton>
+                <ActionButton variant="primary" onClick={confirmGroupDispense}>Confirmar Dispensa</ActionButton>
+              </div>
+            </>
+          );
+        })()}
+      </AnimatedModal>
+
+      {/* DISPENSE TO SHOP MODAL */}
+      <AnimatedModal isOpen={isDispenseToShopOpen} onClose={() => setIsDispenseToShopOpen(false)}>
+        {dispenseToShopBatch && (
+          <>
+            <CloseIcon onClick={() => setIsDispenseToShopOpen(false)}><FaTimes /></CloseIcon>
+            <h2 style={{ marginBottom: '1rem', color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <FaHandHoldingMedical /> Enviar al Dispensario
+            </h2>
+            <p style={{ color: '#cbd5e1' }}>Transferir stock de <strong style={{ color: '#f8fafc' }}>{dispenseToShopBatch.batch_code}</strong> al punto de venta.</p>
+            <p style={{ color: '#cbd5e1' }}>Disponible: <strong style={{ color: '#f8fafc' }}>{dispenseToShopBatch.current_weight}g</strong></p>
+
+            <FormGroup style={{ marginTop: '1rem' }}>
+              <label>Cantidad a Enviar (g)</label>
+              <input
+                type="number"
+                autoFocus
+                value={dispenseToShopAmount}
+                onChange={e => setDispenseToShopAmount(e.target.value)}
+                placeholder="0.00"
+                max={dispenseToShopBatch.current_weight}
+              />
+            </FormGroup>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1rem' }}>
+              <ActionButton variant="secondary" onClick={() => setIsDispenseToShopOpen(false)}>Cancelar</ActionButton>
+              <ActionButton variant="primary" onClick={confirmDispenseToShop}>Enviar</ActionButton>
+            </div>
+          </>
+        )}
+      </AnimatedModal>
+
+
+
+      {/* GROUP LAB TRANSFER MODAL (BULK) */}
+      <AnimatedModal isOpen={isGroupLabOpen} onClose={() => setIsGroupLabOpen(false)}>
+        {groupLabStrain && (() => {
+          const itemGroup = visibleStock.find(s => s.strain === groupLabStrain);
+          const maxAvailable = itemGroup ? itemGroup.totalWeight : 0;
+          return (
+            <>
+              <CloseIcon onClick={() => setIsGroupLabOpen(false)}><FaTimes /></CloseIcon>
+              <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--primary-color, #a855f7)' }}>
+                <FaFlask /> Enviar a Laboratorio: {groupLabStrain}
+              </h2>
+
+              <div style={{ marginBottom: '1.5rem', background: 'rgba(30, 41, 59, 0.6)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#cbd5e1' }}>Stock Total Disponible en todas las plantas:</p>
+                <p style={{ margin: '0.25rem 0 0 0', fontWeight: 'bold', color: 'var(--primary-color, #a855f7)', fontSize: '1.25rem' }}>{maxAvailable.toFixed(2)}g</p>
+                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>Se enviará al laboratorio descontando automáticamente desde los lotes más antiguos hasta alcanzar la cantidad total.</p>
+              </div>
+
+              <FormGroup style={{ marginTop: '1rem' }}>
+                <label>Cantidad Total a Enviar (g)</label>
+                <input
+                  type="number"
+                  autoFocus
+                  value={groupLabAmount}
+                  onChange={e => setGroupLabAmount(e.target.value)}
+                  placeholder="0.00"
+                  max={maxAvailable}
+                />
+              </FormGroup>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
+                <ActionButton variant="secondary" onClick={() => setIsGroupLabOpen(false)}>Cancelar</ActionButton>
+                <ActionButton variant="primary" style={{ background: 'var(--primary-color, #a855f7)', borderColor: 'var(--primary-color, #a855f7)' }} onClick={confirmGroupLabTransfer}>Confirmar Envío</ActionButton>
+              </div>
+            </>
+          );
+        })()}
+      </AnimatedModal>
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        isDanger={confirmModal.isDanger}
+      />
+
+      <ToastModal
+        isOpen={toast.isOpen}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast(prev => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* LAB TRANSFER MODAL */}
+      <AnimatedModal isOpen={isLabTransferOpen} onClose={() => setIsLabTransferOpen(false)}>
+        <CloseIcon onClick={() => setIsLabTransferOpen(false)}><FaTimes /></CloseIcon>
+        <h2 style={{ marginBottom: '1.5rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FaFlask /> Enviar a Laboratorio
+        </h2>
+        {labTransferBatch && (
+          <div style={{ marginBottom: '1.5rem', background: 'rgba(30, 41, 59, 0.6)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+            <p style={{ margin: 0, fontWeight: 'bold', color: '#f8fafc' }}>{labTransferBatch.strain_name}</p>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#cbd5e1' }}>Lote: {labTransferBatch.batch_code}</p>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#cbd5e1' }}>Disponible: {labTransferBatch.current_weight}g</p>
+          </div>
+        )}
+        <FormGroup>
+          <label>Cantidad a enviar (g)</label>
+          <input
+            type="number"
+            value={labTransferAmount}
+            onChange={e => setLabTransferAmount(e.target.value)}
+            placeholder="0.00"
+            autoFocus
+          />
+        </FormGroup>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '2rem' }}>
+          <ActionButton variant="secondary" onClick={() => setIsLabTransferOpen(false)}>Cancelar</ActionButton>
+          <ActionButton variant="primary" onClick={confirmLabTransfer}>Confirmar Envío</ActionButton>
+        </div>
+      </AnimatedModal>
+
+      {/* UNITS MODAL (Level 3 - Lote Origen Details) */}
+      <AnimatedModal isOpen={modalUnitsData.isOpen} onClose={() => setModalUnitsData(prev => ({ ...prev, isOpen: false }))} wide>
+        <CloseIcon onClick={() => setModalUnitsData(prev => ({ ...prev, isOpen: false }))}><FaTimes /></CloseIcon>
+        <h2 style={{ marginBottom: '1.5rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FaBoxes /> Unidades del lote: {modalUnitsData.originName}
+        </h2>
+
+        <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '0.5rem' }}>
+          <DetailTable>
+            <thead>
+              <tr>
+                <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'left', fontWeight: 600, fontSize: '0.8rem' }}>CÓDIGO DE UNIDAD</th>
+                <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'right', fontWeight: 600, fontSize: '0.8rem' }}>PESO ACT/INI</th>
+                <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'left', fontWeight: 600, fontSize: '0.8rem' }}>OBSERVACIONES</th>
+                <th style={{ color: '#94a3b8', padding: '0.5rem', textAlign: 'right', fontWeight: 600, fontSize: '0.8rem' }}>ACCIONES DE LOTE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modalUnitsData.batches.map(batch => (
+                <tr key={batch.id}>
+                  <td style={{ fontFamily: 'monospace', color: '#38bdf8', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>{batch.batch_code}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
+                    {Number(batch.current_weight).toFixed(2)}g <span style={{ color: '#64748b', fontWeight: 'normal' }}>/ {Number(batch.initial_weight).toFixed(2)}g</span>
+                  </td>
+                  <td style={{ fontStyle: 'italic', color: '#cbd5e1', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem' }} title={batch.notes || ''}>
+                    {batch.notes || '-'}
+                  </td>
+                  <td style={{ textAlign: 'right', minWidth: '120px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                      <IconButton color="#38bdf8" title="Imprimir Etiqueta" onClick={(e) => { e.stopPropagation(); setModalUnitsData(prev => ({ ...prev, isOpen: false })); triggerPrint(batch); }}>
+                        <FaPrint size={12} />
+                      </IconButton>
+                      <IconButton color="#3182ce" title="Editar Lote" onClick={(e) => { e.stopPropagation(); setModalUnitsData(prev => ({ ...prev, isOpen: false })); openEdit(batch); }}>
+                        <FaEdit size={12} />
+                      </IconButton>
+                      <IconButton color="#805ad5" title="Enviar al Laboratorio" onClick={(e) => { e.stopPropagation(); setModalUnitsData(prev => ({ ...prev, isOpen: false })); setLabTransferBatch(batch); setLabTransferAmount(''); setIsLabTransferOpen(true); }}>
+                        <FaFlask size={12} />
+                      </IconButton>
+                      <IconButton color="#e53e3e" title="Dar de Baja" onClick={(e) => { e.stopPropagation(); setModalUnitsData(prev => ({ ...prev, isOpen: false })); initDelete(batch); }}>
+                        <FaTrash size={12} />
+                      </IconButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </DetailTable>
+        </div>
+      </AnimatedModal>
+
+      {/* Hidden Printable Label */}
+      <div style={{ display: 'none' }}>
+        <div ref={printLabelRef}>
+          {printingBatch && (
+            <StockLabel
+              patientName=""
+              legajo={printingBatch.batch_code || ''}
+              geneticName={printingBatch.strain_name || ''}
+              weight={printingBatch.current_weight ? `${Number(printingBatch.current_weight).toFixed(2)}g` : '0.00g'}
+              date={new Date().toLocaleDateString('es-AR')}
+              organizationName={currentOrganization?.name || 'TrazAPP'}
+              logoUrl={currentOrganization?.logo_url || ''}
+              settings={currentOrganization?.label_settings as any}
+            />
+          )}
+        </div>
+      </div>
+
+    </PageContainer >
+  );
+};
+
+export default Stock;

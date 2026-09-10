@@ -1,0 +1,88 @@
+/* Global styles for Aurora Del Plata App */
+
+/* Prevent layout shift by forcing scrollbar presence */
+html {
+  background-color: #020617 !important;
+}
+
+body {
+  margin: 0;
+  background-color: #020617 !important;
+}
+
+#root {
+  background-color: #020617 !important;
+}
+
+/* Aseguramos que el contenedor de tu reporte también sea blanco */
+.printable-report {
+  background-color: white !important;
+}
+
+/* Calendar Hover Effect */
+.calendar-day-hover:hover {
+  background: #f7fafc !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  z-index: 10;
+}
+
+
+/* ==================================================================================
+ * 🖨️ STYLES DE IMPRESIÓN GLOBALES (¡NO MODIFICAR! MANTENER ALTO CONTRASTE) 🖨️
+ * ================================================================================== */
+@media screen {
+
+  .printable-map-details,
+  .printable-report {
+    display: none !important;
+  }
+}
+
+@media print {
+
+  /* 1. Ocultar la UI de la aplicación */
+  .no-print,
+  aside,
+  nav,
+  header,
+  footer {
+    display: none !important;
+  }
+
+  /* 2. Mostrar contenedores de impresión */
+  .printable-map-details,
+  .printable-report {
+    display: block !important;
+    background-color: white !important;
+    /* BLINDAJE: Fondo de reporte = Blanco */
+  }
+
+  /* 3. Forzar fondos blancos y eliminar imágenes de fondo globales para ahorrar tinta */
+  html,
+  body,
+  #root,
+  #root>div,
+  [class*="Container"],
+  [class*="Layout"],
+  main {
+    background-color: white !important;
+    background-image: none !important;
+    color: black !important;
+  }
+
+  /* 4. Forzar que el navegador respete nuestros colores (WebKit/Blink) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ensure map takes full width */
+  .active-map-container {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

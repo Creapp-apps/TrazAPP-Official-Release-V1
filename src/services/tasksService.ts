@@ -1,0 +1,265 @@
+import { supabase, getSelectedOrgId } from './supabaseClient';
+import { Task, CreateTaskInput, TaskType } from '../types';
+import { notificationService } from './notificationService';
+import { addDays, addWeeks, addMonths, parseISO, format } from 'date-fns';
+
+export const tasksService = {
+    async getPendingTasks(): Promise<Task[]> {
+        if (!supabase) return [];
+
+        const { data, error } = await supabase
+            .from('chakra_tasks')
+            .select('*')
+            .eq('organization_id', getSelectedOrgId())
+            .neq('status', 'dismissed')
+            .neq('status', 'done')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching tasks:', error);
+            return [];
+        }
+
+        return data as Task[];
+    },
+
+    async createTask(task: CreateTaskInput): Promise<Task | null> {
+        if (!supabase) return null;
+
+        let taskData: any = null;
+        let taskError: any = null;
+
+        // Si la tarea incluye la deducción de un insumo, llamamos al RPC
+        if (task.insumo_id && task.estimated_volume) {
+            const { data, error } = await supabase.rpc('execute_task_with_stock', {
+                p_title: task.title,
+                p_description: task.description,
+                p_type: task.type,
+                p_due_date: task.due_date,
+                p_crop_id: task.crop_id,
+                p_room_id: task.room_id,
+                p_map_id: task.map_id,
+                p_assigned_to: task.assigned_to,
+                p_observations: task.observations,
+                p_photos: task.photos,
+                p_recurrence: task.recurrence,
+                p_organization_id: getSelectedOrgId(),
+                p_insumo_id: task.insumo_id,
+                p_estimated_volume: task.estimated_volume
+            });
+            taskData = data;
+            taskError = error;
+        } else {
+            // Creación estándar de tarea
+            const { data, error } = await supabase
+                .from('chakra_tasks')
+                .insert([{
+                    title: task.title,
+                    description: task.description,
+                    type: task.type,
+                    due_date: task.due_date,
+                    crop_id: task.crop_id,
+                    room_id: task.room_id,
+                    map_id: task.map_id,
+                    assigned_to: task.assigned_to,
+                    status: 'pending',
+                    observations: task.observations,
+                    photos: task.photos,
+                    recurrence: task.recurrence,
+                    organization_id: getSelectedOrgId()
+                }])
+                .select()
+                .single();
+            taskData = data;
+            taskError = error;
+        }
+
+        if (taskError) {
+            console.error('Error creating task:', taskError);
+            return null;
+        }
+
+        return taskData as Task;
+    },
+
+    async updateStatus(id: string, status: 'pending' | 'done' | 'dismissed'): Promise<boolean> {
+        if (!supabase) return false;
+
+        const { error } = await supabase
+            .from('chakra_tasks')
+            .update({ status })
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error updating task status:', error);
+            return false;
+        }
+
+        // Send Notification if marked as DONE
+        if (status === 'done') {
+            // Fetch task details for notification and recurrence
+            const { data: taskData } = await supabase
+                .from('chakra_tasks')
+                .select('title, recurrence, due_date, description, type, crop_id, room_id')
+                .eq('id', id)
+                .single();
+
+            if (taskData) {
+                // Determine User for Notification
+                const { data: { user } } = await supabase.auth.getUser();
+                const userName = user?.user_metadata?.name || user?.email?.split('@')[0] || 'Alguien';
+
+                notificationService.sendSelfNotification(
+                    `Tarea Completada (${userName})`,
+                    `✅ ${taskData.title}`
+                );
+
+                // Handle Recurrence
+                if (taskData.recurrence) {
+                    const rec = taskData.recurrence as any;
+                    let nextDate: Date | null = null;
+                    const currentDate = taskData.due_date ? parseISO(taskData.due_date) : new Date();
+
+                    if (rec.type === 'custom' || rec.type === 'daily' || rec.type === 'weekly') {
+                        const interval = rec.interval || 1;
+                        if (rec.unit === 'day' || rec.type === 'daily') {
+                            nextDate = addDays(currentDate, interval);
+                        } else if (rec.unit === 'week' || rec.type === 'weekly') {
+                            nextDate = addWeeks(currentDate, interval);
+                        } else if (rec.unit === 'month') {
+                            nextDate = addMonths(currentDate, interval);
+                        }
+                    }
+
+                    if (nextDate) {
+                        await this.createTask({
+                            title: taskData.title,
+                            description: taskData.description,
+                            type: taskData.type,
+                            due_date: format(nextDate, 'yyyy-MM-dd'),
+                            crop_id: taskData.crop_id,
+                            room_id: taskData.room_id,
+                            recurrence: rec // Pass recurrence to next task to continue chain
+                        });
+                    }
+                }
+            }
+        }
+
+        return true;
+    },
+
+    async updateTask(id: string, updates: Partial<CreateTaskInput>): Promise<boolean> {
+        if (!supabase) return false;
+
+        const { error } = await supabase
+            .from('chakra_tasks')
+            .update(updates)
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error updating task:', error);
+            return false;
+        }
+        return true;
+    },
+
+    async deleteTask(id: string): Promise<boolean> {
+        if (!supabase) return false;
+
+        const { error } = await supabase
+            .from('chakra_tasks')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error deleting task:', error, JSON.stringify(error, null, 2));
+            return false;
+        }
+        return true;
+    },
+
+    async getTasksByCropId(cropId: string): Promise<Task[]> {
+        if (!supabase) return [];
+
+        const { data, error } = await supabase
+            .from('chakra_tasks')
+            .select('*')
+            .eq('organization_id', getSelectedOrgId())
+            .eq('crop_id', cropId);
+
+        if (error) {
+            console.error('Error fetching tasks for crop:', error);
+            return [];
+        }
+
+        return data as Task[];
+    },
+
+    async getTasksByRoomId(roomId: string): Promise<Task[]> {
+        if (!supabase) return [];
+
+        const { data, error } = await supabase
+            .from('chakra_tasks')
+            .select('*')
+            .eq('organization_id', getSelectedOrgId())
+            .eq('room_id', roomId)
+            .neq('status', 'dismissed');
+
+        if (error) {
+            console.error('Error fetching tasks for room:', error);
+            return [];
+        }
+
+        return data as Task[];
+    },
+
+    // --- Task Types ---
+    async getTaskTypes(): Promise<TaskType[]> {
+        if (!supabase) return [];
+        const { data, error } = await supabase
+            .from('task_types')
+            .select('*')
+            .eq('organization_id', getSelectedOrgId())
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            console.error('Error fetching task types:', error);
+            return [];
+        }
+        return data as TaskType[];
+    },
+
+    async createTaskType(name: string, color?: string): Promise<TaskType | null> {
+        if (!supabase) return null;
+        const { data, error } = await supabase
+            .from('task_types')
+            .insert([{
+                name,
+                color,
+                organization_id: getSelectedOrgId()
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error creating task type:', error);
+            throw error;
+        }
+        return data as TaskType;
+    },
+
+    async deleteTaskType(id: string): Promise<boolean> {
+        if (!supabase) return false;
+        const { error } = await supabase
+            .from('task_types')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error('Error deleting task type:', error);
+            return false;
+        }
+        return true;
+    }
+};

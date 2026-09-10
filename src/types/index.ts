@@ -1,0 +1,386 @@
+// Auth & Users
+import { Room } from './rooms';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'super_admin' | 'owner' | 'admin' | 'grower' | 'medico' | 'staff' | 'partner' | 'member';
+  avatar?: string;
+  professional_signature_url?: string;
+  has_completed_tour?: boolean;
+  kyc_completed?: boolean;
+  created_at?: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface AuthContextType {
+  user: User | null;
+  login: (credentials: LoginCredentials) => Promise<{ success: boolean; error?: string }>;
+  logout: () => void;
+  isLoading: boolean;
+  resetTour: () => Promise<void>;
+  tourStepIndex: number;
+  setTourStepIndex: (index: number) => void;
+  kycStatus?: 'pending' | 'blocked' | 'completed';
+  daysFromRegistration?: number;
+
+  // Session Timeout
+  isIdleWarningOpen: boolean;
+  idleCountdown: number;
+  continueSession: () => void;
+}
+
+// ==========================
+// Tipos para Gestión de Organizaciones (SaaS)
+// ==========================
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string; // references plans.slug
+  logo_url?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  status?: 'pending' | 'active' | 'suspended';
+  owner_email?: string;
+  stripe_customer_id?: string;
+  created_at: string;
+  subscription_status?: 'active' | 'trial' | 'past_due' | 'cancelled' | 'pending_validation';
+  valid_until?: string;
+  onboarding_completed?: boolean;
+  enabled_modules?: any;
+  // Lead info
+  owner_name?: string;
+  phone?: string;
+  referral_source?: string;
+  // Deprecated hardcoded fields in favor of Plan limits
+  max_users?: number;
+  max_storage_gb?: number;
+  is_revenue_exempt?: boolean;
+  label_settings?: {
+    themeMode: 'color' | 'bw';
+    primaryColor: string;
+    secondaryColor: string;
+    fontFamily: string;
+    backgroundPattern: string;
+    sidebarDesign?: 'solid' | 'gradient';
+    showAddress: boolean;
+    addressText: string;
+    phoneText: string;
+  };
+  custom_domain?: string;
+  landing_settings?: {
+    heroTitle?: string;
+    heroSubtitle?: string;
+    portalSubtitle?: string;
+    aboutText?: string;
+    backgroundUrl?: string;
+    gamePlanTitle?: string;
+    step1Title?: string;
+    step1Text?: string;
+    step2Title?: string;
+    step2Text?: string;
+    step3Title?: string;
+    step3Text?: string;
+    catalogTitle?: string;
+    catalogSubtitle?: string;
+    contactTitle?: string;
+    contactText?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+  };
+}
+
+export interface LandingArticle {
+  id: string;
+  organization_id: string;
+  title: string;
+  description: string;
+  image_url?: string;
+  order_index: number;
+  created_at: string;
+}
+
+export interface Plan {
+  id: string;
+  name: string;
+  slug: string;
+  price: number;
+  limits: {
+    max_users: number;
+    max_storage_gb: number;
+    [key: string]: any;
+  };
+  features: string[];
+  active: boolean;
+  created_at: string;
+}
+
+// ==========================
+// Tipos para Simulador de Auto-Alta (Self-Onboarding)
+// ==========================
+export interface PatientInvitation {
+  id: string;
+  organization_id: string;
+  email: string;
+  status: 'pending' | 'used' | 'expired';
+  expires_at: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationMember {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  role: 'owner' | 'admin' | 'grower' | 'medico';
+  created_at: string;
+  organization?: Organization; // Joined
+}
+
+// ==========================
+// Tipos para Gestión de Cultivos (CRM de Cultivo)
+// ==========================
+
+export interface CropPartner {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface Crop {
+  id: string;
+  name: string;
+  location?: string;
+  startDate: string; // ISO
+  estimatedHarvestDate?: string; // ISO
+  photoUrl?: string;
+  partners: CropPartner[]; // pensado para 2 personas
+  status: 'active' | 'paused' | 'completed';
+  color?: string; // New field for color
+  rooms?: Room[]; // Joined rooms
+}
+
+export interface EnvParams {
+  temperatureC: number; // °C
+  humidityPct: number; // %
+  soilMoisturePct?: number; // %
+  ph?: number; // 0-14
+  ecMs?: number; // mS/cm
+}
+
+export interface DailyRecord {
+  id: string;
+  cropId: string;
+  date: string; // ISO date
+  params: EnvParams;
+  notes?: string;
+  photos?: string[];
+  createdBy: string; // partner id
+  createdAt: string; // ISO timestamp
+}
+
+export interface CropTask {
+  id: string;
+  cropId: string;
+  title: string;
+  description?: string;
+  assignedTo?: string; // partner id
+  status: 'pending' | 'in-progress' | 'done';
+  priority: 'low' | 'medium' | 'high';
+  dueDate?: string; // ISO date
+  createdAt: string;
+  createdBy: string;
+  completedAt?: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  type: string;
+  status: 'pending' | 'done' | 'dismissed';
+  due_date?: string;
+  created_at: string;
+  room_id?: string;
+  assigned_to?: string;
+  observations?: string;
+  photos?: string[];
+  crop_id?: string;
+  map_id?: string;
+  completed_at?: string;
+  recurrence?: RecurrenceConfig;
+  insumo_id?: string;
+  estimated_volume?: number;
+}
+
+export interface CreateTaskInput {
+  title: string;
+  description?: string;
+  type: string;
+  due_date?: string;
+  room_id?: string;
+  crop_id?: string;
+  assigned_to?: string;
+  recurrence?: RecurrenceConfig;
+  insumo_id?: string;
+  estimated_volume?: number;
+  map_id?: string;
+  observations?: string;
+  photos?: string[];
+}
+
+export interface RecurrenceConfig {
+  type: 'daily' | 'weekly' | 'custom';
+  interval: number | string; // Every X units
+  unit: 'day' | 'week' | 'month';
+  daysOfWeek?: number[]; // 0=Sunday, 1=Monday...
+  endDate?: string; // ISO
+  endOccurrences?: number;
+  currentOccurrence?: number;
+  exceptions?: string[]; // Array of YYYY-MM-DD strings for deleted occurrences
+}
+
+
+// ==========================
+// Tipos para Gestión de Insumos (Materia Prima)
+// ==========================
+
+export interface InsumoCategory {
+  id: string;
+  organization_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface Insumo {
+  id: string;
+  nombre: string;
+  categoria: string;
+  unidad_medida: string;
+  precio_actual: number;
+  precio_anterior?: number;
+  proveedor?: string;
+  provider_id?: string; // New: Foreign key to insumo_providers
+  fecha_ultima_compra?: string;
+  fecha_ultimo_precio: string;
+  stock_actual: number; // Used for "Discrete Units" historically
+  stock_minimo: number;
+
+  // Volumetric Data added for AI and detailed stock
+  current_volume?: number;
+  total_volume?: number;
+  unit_of_measurement?: string; // 'L', 'ml', 'g', etc.
+  reorder_threshold?: number;
+  auto_restock_enabled?: boolean;
+
+  notas?: string;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  updated_by?: string;
+  ticket_url?: string;
+}
+
+export interface HistorialPrecio {
+  id: string;
+  insumo_id: string;
+  precio: number;
+  fecha_cambio: string;
+  motivo_cambio?: 'compra' | 'ajuste' | 'inflación' | 'oferta' | 'otro';
+  proveedor?: string;
+  cantidad_comprada?: number;
+  costo_total?: number;
+  created_at: string;
+  created_by?: string;
+  ticket_url?: string;
+}
+
+export interface InsumoConHistorial extends Insumo {
+  historial_precios: HistorialPrecio[];
+  variacion_precio?: number;
+  porcentaje_variacion?: number;
+}
+
+export interface StickyNote {
+  id: string;
+  content: string;
+  color: 'yellow' | 'blue' | 'pink' | 'green';
+  created_at: string;
+  created_by?: string;
+  user_id?: string;
+  room_id?: string;
+  target_date?: string; // ISO Date "YYYY-MM-DD"
+}
+
+// ==========================
+// Tipos para Seguimiento Clínico (Clinical Module)
+// ==========================
+
+export interface ClinicalAdmission {
+  id: string;
+  patient_id: string;
+  patient_hash: string;
+  created_at: string;
+
+  // Diagnosis
+  diagnosis_cie11: string[]; // Codes or Names
+
+  // Pharmacology
+  medications: Medication[];
+
+  // Baseline Metrics
+  baseline_qol: number; // 0-100
+  baseline_pain_avg: number; // 0-10
+  baseline_pain_worst: number; // 0-10
+
+  notes?: string;
+}
+
+export interface Medication {
+  name: string;
+  dose: string;
+  frequency: string;
+  interaction_risk?: 'high' | 'moderate' | 'low' | 'none'; // CYP3A4 / CYP2C9
+}
+
+export interface ClinicalEvolution {
+  id: string;
+  admission_id: string;
+  date: string; // YYYY-MM-DD
+
+  // Traceability
+  batch_id?: string;
+
+  // Assessment
+  eva_score: number; // 0-10
+  improvement_percent?: number;
+
+  // Effects
+  sparing_effect: any[]; // JSON
+  adverse_effects: AdverseEffect[];
+
+  notes?: string;
+  created_at: string;
+}
+
+export interface AdverseEffect {
+  effect: string;
+  intensity: 'mild' | 'moderate' | 'severe';
+}
+
+export interface TaskType {
+  id: string;
+  organization_id: string;
+  name: string;
+  color?: string;
+  created_at: string;
+}

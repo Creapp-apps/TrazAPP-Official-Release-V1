@@ -1,0 +1,94 @@
+
+[functions.create-user]
+enabled = true
+verify_jwt = true
+import_map = "./functions/create-user/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/create-user/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/create-user/*.html" ]
+
+[functions.send-invite]
+enabled = true
+verify_jwt = true
+import_map = "./functions/send-invite/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-invite/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-invite/*.html" ]
+
+[functions.growy-gemini]
+enabled = true
+verify_jwt = false
+import_map = "./functions/growy-gemini/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/growy-gemini/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/growy-gemini/*.html" ]
+
+[functions.deepgram-token]
+enabled = true
+verify_jwt = true
+import_map = "./functions/deepgram-token/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/deepgram-token/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/deepgram-token/*.html" ]
+
+[functions.process-clinical-audio]
+enabled = true
+verify_jwt = true
+import_map = "./functions/process-clinical-audio/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/process-clinical-audio/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/process-clinical-audio/*.html" ]
+
+[functions.growy-guardian]
+enabled = true
+verify_jwt = true
+import_map = "./functions/growy-guardian/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/growy-guardian/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/growy-guardian/*.html" ]
+
+[functions.process-patient-onboarding]
+enabled = true
+verify_jwt = true
+import_map = "./functions/process-patient-onboarding/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/process-patient-onboarding/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/process-patient-onboarding/*.html" ]
+
+[functions.generate-invite-link]
+enabled = true
+verify_jwt = true
+import_map = "./functions/generate-invite-link/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/generate-invite-link/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/generate-invite-link/*.html" ]
+
+[functions.trazapp-telemetry]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/trazapp-telemetry/index.ts"
+

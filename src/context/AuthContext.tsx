@@ -1,0 +1,550 @@
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { User, LoginCredentials, AuthContextType } from '../types';
+import { supabase } from '../services/supabaseClient';
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
+  }
+  return context;
+};
+
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [kycStatus, setKycStatus] = useState<'pending' | 'blocked' | 'completed' | undefined>(undefined);
+  const [daysFromRegistration, setDaysFromRegistration] = useState<number | undefined>(undefined);
+  const [tourStepIndex, setTourStepIndex] = useState<number>(() => {
+    const saved = localStorage.getItem('trazapp_tour_step');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('trazapp_tour_step', tourStepIndex.toString());
+  }, [tourStepIndex]);
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  // --- INACTIVITY TRACKING LOGIC ---
+  const [isIdleWarningOpen, setIsIdleWarningOpen] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(60);
+  const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes in ms
+  const WARNING_DURATION = 60; // 60 seconds
+
+  // Refs to hold mutable state inside event listeners without forcing re-renders
+  const isIdleWarningOpenRef = React.useRef(false); // Fix dependency cycle
+  const lastActivityRef = React.useRef<number>(Date.now());
+  const expiryTimeRef = React.useRef<number | null>(null);
+  const warningTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const countdownIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Keep ref synced with state
+  useEffect(() => {
+    isIdleWarningOpenRef.current = isIdleWarningOpen;
+  }, [isIdleWarningOpen]);
+
+  const triggerSessionExpiration = React.useCallback(() => {
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+    
+    // Hard reset logic to guarantee they are kicked out even if React state is stale
+    localStorage.clear();
+    localStorage.setItem('session_timeout_flag', 'true');
+    
+    // Attempt to gracefully sign out in the background, but primarily force the redirect
+    if (supabase) {
+      supabase.auth.signOut().catch(e => console.warn('Silent signout error:', e));
+    }
+    
+    // Note: window.location.href bypasses React Router so the app fully reloads
+    setTimeout(() => {
+       window.location.href = '/login'; 
+    }, 100);
+  }, []);
+
+  const startCountdown = React.useCallback((expiryTime: number) => {
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+    const updateCountdown = () => {
+      const now = Date.now();
+      const remaining = Math.max(0, Math.round((expiryTime - now) / 1000));
+      setIdleCountdown(remaining);
+
+      if (remaining <= 0) {
+        triggerSessionExpiration();
+      }
+    };
+
+    // Run once immediately
+    updateCountdown();
+
+    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
+  }, [triggerSessionExpiration]);
+
+  const resetActivity = React.useCallback(() => {
+    // If warning is already open, user must explicitly click "Keep Session"
+    if (isIdleWarningOpenRef.current) return;
+    
+    lastActivityRef.current = Date.now();
+    
+    // Clear existing timers
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+    // Set new timer to trigger warning
+    warningTimerRef.current = setTimeout(() => {
+      setIsIdleWarningOpen(true);
+      const expiryTime = Date.now() + WARNING_DURATION * 1000;
+      expiryTimeRef.current = expiryTime;
+      startCountdown(expiryTime);
+    }, IDLE_TIMEOUT);
+  }, [startCountdown]);
+
+  const continueSession = () => {
+    setIsIdleWarningOpen(false);
+    setIdleCountdown(WARNING_DURATION);
+    resetActivity();
+  };
+
+  // Attach listeners on mount
+  useEffect(() => {
+    // Only track if user is logged in
+    if (!user) {
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      return;
+    }
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+    
+    // Initial trigger
+    resetActivity();
+
+    const handleActivity = () => resetActivity();
+
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity, { passive: true });
+    });
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - lastActivityRef.current;
+        const totalTimeout = IDLE_TIMEOUT + WARNING_DURATION * 1000;
+
+        if (elapsed >= totalTimeout) {
+          triggerSessionExpiration();
+        } else if (elapsed >= IDLE_TIMEOUT) {
+          setIsIdleWarningOpen(true);
+          const expiryTime = lastActivityRef.current + totalTimeout;
+          expiryTimeRef.current = expiryTime;
+          startCountdown(expiryTime);
+        } else {
+          if (isIdleWarningOpenRef.current) {
+            setIsIdleWarningOpen(false);
+          }
+          if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+          const timeRemaining = IDLE_TIMEOUT - elapsed;
+          warningTimerRef.current = setTimeout(() => {
+            setIsIdleWarningOpen(true);
+            const expiryTime = Date.now() + WARNING_DURATION * 1000;
+            expiryTimeRef.current = expiryTime;
+            startCountdown(expiryTime);
+          }, timeRemaining);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    };
+  }, [user, resetActivity, startCountdown, triggerSessionExpiration]);
+  // --- END INACTIVITY TRACKING LOGIC ---
+
+  useEffect(() => {
+    let mounted = true;
+
+    // FAILSAFE: Force stop loading after 3 seconds to prevent infinite "Iniciando..."
+    const safetyTimer = setTimeout(() => {
+      if (mounted) {
+        console.warn('AuthContext: Safety timer triggered. Forcing isLoading=false');
+        setIsLoading(false);
+      }
+    }, 3000);
+
+    const calculateKycStatus = (createdAtString: string | undefined, isComplete: boolean | undefined) => {
+      if (isComplete) {
+        setKycStatus('completed');
+        return;
+      }
+
+      if (!createdAtString) {
+        setKycStatus('pending');
+        return;
+      }
+
+      const createdDate = new Date(createdAtString);
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - createdDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      setDaysFromRegistration(diffDays);
+
+      if (diffDays >= 30) {
+        setKycStatus('blocked');
+      } else {
+        setKycStatus('pending');
+      }
+    };
+
+    const fetchProfile = async (sessionUser: any) => {
+      try {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sessionUser.id)
+          .single();
+
+        if (!mounted) return null;
+
+        if (error) {
+          console.warn('AuthContext: Error fetching profile:', error);
+          return null;
+        }
+        return profile;
+      } catch (error) {
+        console.error('AuthContext: Unexpected error fetching profile:', error);
+        return null;
+      }
+    };
+
+    let isUpdatingProfile = false;
+
+    const handleUserUpdate = async (session: any) => {
+      console.log('AuthContext: handleUserUpdate started. session exists?', !!session);
+
+      // Prevent double execution race condition on hard refresh
+      if (isUpdatingProfile) {
+        console.log('AuthContext: handleUserUpdate is already running in parallel, skipping...');
+        return;
+      }
+      isUpdatingProfile = true;
+
+      try {
+        if (!session?.user) {
+          if (mounted) {
+            console.log('AuthContext: No session user. Setting user=null, isLoading=false');
+            setUser(null);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        // 1. Optimistic set - UNBLOCK UI IMMEDIATELY
+        const cachedRole = localStorage.getItem('userRole')?.toLowerCase();
+        const metaRole = session.user.user_metadata?.role?.toLowerCase();
+        // Priority: Cache (Correct/Latest) > Meta (Maybe Stale) > Default
+        const effectiveRole = cachedRole || metaRole || 'partner';
+
+        const initialUser: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Usuario',
+          role: effectiveRole as any,
+          avatar: session.user.user_metadata?.avatar,
+          has_completed_tour: true // Optimistically assume true until DB confirms it's false for new users
+        };
+
+        if (mounted) {
+          console.log('AuthContext: Optimistic user set. Setting isLoading=false');
+          setUser(initialUser);
+          setIsLoading(false);
+        }
+
+        // 2. Background profile update
+        console.log('AuthContext: Fetching profile in background...');
+        fetchProfile(session.user).then(profile => {
+          if (mounted && profile) {
+            console.log('AuthContext: Profile fetched successfully', profile);
+            const dbName = profile?.full_name || profile?.name || profile?.nombre || profile?.username;
+            const rawDbRole = profile?.role;
+            const dbRole = rawDbRole ? rawDbRole.toLowerCase() : null;
+
+            // Always update cache if we get a valid role
+            if (dbRole) localStorage.setItem('userRole', dbRole);
+
+            if (dbRole === 'owner') {
+              calculateKycStatus(profile?.created_at, profile?.kyc_completed);
+            } else {
+              setKycStatus('completed'); // Only owners need to do KYC for now
+            }
+
+            setUser(prev => {
+              if (!prev || prev.id !== session.user.id) return prev;
+
+              // PROTECTION: Don't downgrade Super Admin to Partner based on ambiguous DB data
+              if (prev.role === 'super_admin' && dbRole && dbRole !== 'super_admin') {
+                console.warn('AuthContext: SAFETY BLOCKED - Prevented downgrading Super Admin to', dbRole);
+                // Update other fields but KEEP role as super_admin
+                return {
+                  ...prev,
+                  name: dbName || prev.name,
+                  avatar: profile?.avatar_url || prev.avatar,
+                  professional_signature_url: profile?.professional_signature_url || prev.professional_signature_url,
+                  has_completed_tour: profile?.has_completed_tour ?? false,
+                  kyc_completed: profile?.kyc_completed,
+                  created_at: profile?.created_at
+                };
+              }
+
+              return {
+                ...prev,
+                name: dbName || prev.name,
+                role: dbRole || prev.role,
+                avatar: profile?.avatar_url || prev.avatar,
+                professional_signature_url: profile?.professional_signature_url || prev.professional_signature_url,
+                has_completed_tour: profile?.has_completed_tour ?? false,
+                kyc_completed: profile?.kyc_completed,
+                created_at: profile?.created_at
+              };
+            });
+          }
+        });
+
+        if (mounted) setIsLoading(false);
+      } finally {
+        isUpdatingProfile = false;
+      }
+    };
+
+    // Initialize Auth Listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log(`AuthContext: Auth Event ${event}`, session?.user?.id);
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        clearTimeout(safetyTimer);
+        await handleUserUpdate(session);
+      } else if (event === 'SIGNED_OUT') {
+        if (mounted) {
+          clearTimeout(safetyTimer);
+          setUser(null);
+          setIsLoading(false);
+        }
+      }
+    });
+
+    // Check initial session manually in case event doesn't fire immediately
+    console.log('AuthContext: Starting manual getSession check...');
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('AuthContext: getSession returned. session exists?', !!session);
+      if (!mounted) return;
+
+      if (!session) {
+        console.log('AuthContext: No initial session. Setting isLoading=false');
+        clearTimeout(safetyTimer);
+        setIsLoading(false);
+      } else {
+        console.log('AuthContext: Initial session found. Calling handleUserUpdate...');
+        clearTimeout(safetyTimer);
+        handleUserUpdate(session);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const login = async (credentials: LoginCredentials): Promise<{ success: boolean; error?: string }> => {
+    console.log('AuthContext: login started');
+
+    if (!supabase) {
+      console.log('AuthContext: No supabase client');
+      return { success: false, error: 'Error interno: cliente de base de datos no disponible.' };
+    }
+
+    // FORCE CLEANUP: Ensure any previous session is cleared before attempting new login
+    // This fixes the "hanging" issue when switching accounts or after a bad state
+    try {
+      const signOutTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('SignOut Timeout')), 2000));
+      await Promise.race([
+        supabase.auth.signOut(),
+        signOutTimeout
+      ]);
+      console.log('AuthContext: Forced sign out before login');
+    } catch (e) {
+      console.warn('AuthContext: Error during forced sign out (ignoring):', e);
+    }
+
+    // Clear local state as well
+    setUser(null);
+
+    setIsLoading(true);
+
+    try {
+      // Create a timeout promise that rejects after 10 seconds
+      const timeoutPromise = new Promise<{ data: any; error: any }>((_, reject) => {
+        setTimeout(() => reject(new Error('Login request timed out')), 10000);
+      });
+
+      // Race between Supabase login and timeout
+      const { data, error } = await Promise.race([
+        supabase.auth.signInWithPassword({
+          email: credentials.email,
+          password: credentials.password
+        }),
+        timeoutPromise
+      ]);
+
+      if (error) {
+        console.error('AuthContext: Login error:', error);
+
+        let errorMessage = 'Credenciales inválidas. Intenta de nuevo.';
+        if (error.message.includes('Email not confirmed')) {
+          errorMessage = 'Debes confirmar tu email antes de iniciar sesión. Por favor revisa tu bandeja de entrada.';
+        } else if (error.message.includes('Invalid login credentials')) {
+          errorMessage = 'Credenciales inválidas. Intenta de nuevo.';
+        } else if (error.message.includes('timed out')) {
+          errorMessage = 'La solicitud tardó demasiado. Revisa tu conexión a internet.';
+        }
+
+        return { success: false, error: errorMessage };
+      }
+
+      console.log('AuthContext: Login successful, user:', data.user?.id);
+
+      if (data.user) {
+        // Fetch profile from DB with another race condition to prevent hanging
+        const profileTimeoutPromise = new Promise<{ data: any; error: any }>((resolve) => {
+          setTimeout(() => resolve({ data: null, error: new Error('Profile fetch timeout') }), 5000);
+        });
+
+        const { data: profile, error: profileError } = await Promise.race([
+          supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single(),
+          profileTimeoutPromise
+        ]);
+
+        if (profileError) {
+          console.warn('AuthContext: Error fetching profile during login:', profileError);
+        } else {
+          console.log('AuthContext: Profile fetched during login', profile);
+        }
+
+        const dbName = profile?.full_name || profile?.name || profile?.nombre || profile?.username;
+        const dbRole = profile?.role;
+
+        const userData: User = {
+          id: data.user.id,
+          email: data.user.email || '',
+          name: dbName || data.user.user_metadata?.name || data.user.email?.split('@')[0] || 'Usuario',
+          role: dbRole || data.user.user_metadata?.role || 'partner',
+          avatar: profile?.avatar_url || data.user.user_metadata?.avatar,
+          professional_signature_url: profile?.professional_signature_url
+        };
+
+        if (dbRole) localStorage.setItem('userRole', dbRole);
+
+        setUser(userData);
+        console.log('AuthContext: User set after login');
+        return { success: true };
+      }
+
+      return { success: false, error: 'No se pudo obtener la información del usuario.' };
+    } catch (error: any) {
+      console.error('AuthContext: Unexpected error in login:', error);
+      return { success: false, error: error.message || 'Error inesperado al intentar iniciar sesión.' };
+    } finally {
+      console.log('AuthContext: login finally block - setIsLoading(false)');
+      setIsLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    // 1. Try to tell the server we are leaving
+    if (supabase) {
+      try {
+        const signOutTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('SignOut Timeout')), 2000));
+        await Promise.race([
+          supabase.auth.signOut(),
+          signOutTimeout
+        ]);
+      } catch (e) {
+        console.error('Logout error/timeout (ignoring):', e);
+      }
+    }
+
+    // 2. NUKE LOCAL STATE - This prevents "zombie sessions" on refresh
+    localStorage.clear(); // Clear everything including 'userRole' and Supabase tokens
+
+    // 3. Update App State
+    setUser(null);
+  };
+
+  const resetTour = async () => {
+    if (!user?.id) return;
+
+    try {
+      // 1. Update Database
+      const { error } = await supabase
+        .from('profiles')
+        .update({ has_completed_tour: false })
+        .eq('id', user.id);
+
+      if (error) {
+        console.error('AuthContext: Error resetting tour in DB', error);
+        throw error;
+      }
+
+      // 2. Update Local State to instantly trigger UI
+      setUser(prev => prev ? { ...prev, has_completed_tour: false } : null);
+      setTourStepIndex(0);
+
+      console.log('AuthContext: Tour reset successfully');
+    } catch (e) {
+      console.error('AuthContext: Unexpected error in resetTour:', e);
+    }
+  };
+
+  const value: AuthContextType = {
+    user,
+    login,
+    logout,
+    isLoading,
+    resetTour,
+    tourStepIndex,
+    setTourStepIndex,
+    kycStatus,
+    daysFromRegistration,
+    
+    // Session Timeout
+    isIdleWarningOpen,
+    idleCountdown,
+    continueSession
+  };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
